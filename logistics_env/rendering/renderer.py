@@ -107,6 +107,10 @@ class LogisticsRenderer:
         self._font_bold    = None
         self._clock        = None
         self._init_done    = False
+        # Event / interaction state (updated by _handle_events())
+        self.quit_requested: bool  = False
+        self.paused:         bool  = False
+        self._reward_history: list = []   # cumulative rewards for sparkline
 
     def _init_pygame(self) -> None:
         if not _PYGAME_AVAILABLE:
@@ -164,21 +168,34 @@ class LogisticsRenderer:
             return self._render_rgb(grid, products, workers, robots, conveyors, step, order_mgr, extra_info)
 
         self._init_pygame()
-        self._screen.fill(WHITE)
 
+        # Handle events (updates self.quit_requested, self.paused, self._fps)
+        if self._handle_events():
+            return None
+
+        # Paused — draw overlay and wait at low framerate
+        if self.paused:
+            self._draw_pause_overlay()
+            pygame.display.flip()
+            self._clock.tick(8)
+            return None
+
+        self._screen.fill(WHITE)
         self._draw_zones(grid)
         self._draw_conveyors(conveyors, grid)
+
+        # Trails and navigation paths drawn above zones, below agent icons
+        if extra_info:
+            if "trails" in extra_info:
+                self._draw_trails(extra_info["trails"])
+            if "robot_paths" in extra_info:
+                self._draw_robot_paths(extra_info["robot_paths"])
+
         self._draw_products(products)
         self._draw_workers(workers)
         self._draw_robots(robots)
         self._draw_grid_lines(grid)
         self._draw_panel(products, workers, robots, conveyors, step, order_mgr, extra_info)
-
-        # Basic event handling
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                return None
 
         pygame.display.flip()
         effective_fps = fps if fps is not None else self._fps
@@ -278,6 +295,11 @@ class LogisticsRenderer:
             )
 
     def _draw_panel(self, products, workers, robots, conveyors, step, order_mgr, extra_info=None) -> None:
+        if (extra_info or {}).get("panel_mode") == "factory":
+            self._draw_panel_factory(
+                products, workers, robots, conveyors, step, order_mgr, extra_info
+            )
+            return
         cfg  = self.factory_cfg
         px   = cfg.grid.width * CELL
         ph   = cfg.grid.height * CELL
@@ -425,3 +447,290 @@ class LogisticsRenderer:
         if _PYGAME_AVAILABLE and self._init_done:
             pygame.quit()
             self._init_done = False
+
+    # -----------------------------------------------------------------------
+    # Event handling
+    # -----------------------------------------------------------------------
+
+    def _handle_events(self) -> bool:
+        """
+        Processes pygame events. Returns True if quit was requested.
+        Key bindings: SPACE=pause/resume, +/-=speed, Q/ESC=quit.
+        """
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.quit_requested = True
+                pygame.quit()
+                return True
+            elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    self.quit_requested = True
+                    pygame.quit()
+                    return True
+                elif event.key == pygame.K_SPACE:
+                    self.paused = not self.paused
+                elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+                    self._fps = min(60, self._fps + 1)
+                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                    self._fps = max(1, self._fps - 1)
+        return False
+
+    def _draw_pause_overlay(self) -> None:
+        """Semi-transparent 'PAUSED' overlay over the grid area."""
+        if not self._init_done:
+            return
+        cfg = self.factory_cfg
+        w   = cfg.grid.width  * CELL
+        h   = cfg.grid.height * CELL
+        overlay = pygame.Surface((w, h))
+        overlay.set_alpha(140)
+        overlay.fill((18, 22, 40))
+        self._screen.blit(overlay, (0, 0))
+        big = pygame.font.SysFont("monospace", 34, bold=True)
+        msg = big.render("  PAUSED  ", True, (255, 230, 70))
+        self._screen.blit(msg, (w // 2 - msg.get_width() // 2,
+                                h // 2 - msg.get_height() // 2))
+        hint = self._font.render(
+            "SPACE to resume  |  +/- speed  |  Q quit", True, (180, 185, 210)
+        )
+        self._screen.blit(hint, (w // 2 - hint.get_width() // 2,
+                                 h // 2 + 32))
+
+    # -----------------------------------------------------------------------
+    # Trail and navigation path visualisation
+    # -----------------------------------------------------------------------
+
+    def _draw_trails(self, trails: dict) -> None:
+        """
+        Draw product movement trails as fading dots.
+
+        Parameters
+        ----------
+        trails : dict
+            {agent_id: [(x, y), ...]} — ordered from oldest to newest.
+        """
+        for _aid, positions in trails.items():
+            if not positions:
+                continue
+            n = len(positions)
+            for i, (gx, gy) in enumerate(positions):
+                fade   = i / max(n - 1, 1)          # 0=oldest, 1=newest
+                radius = max(2, int(2 + fade * 6))   # 2..8 px
+                r = int(180 + fade * 50)
+                g = int(85  + fade * 55)
+                b = int(20  + fade * 30)
+                cx = gx * CELL + CELL // 2
+                cy = gy * CELL + CELL // 2
+                pygame.draw.circle(self._screen, (r, g, b), (cx, cy), radius)
+
+    def _draw_robot_paths(self, robot_paths: dict) -> None:
+        """
+        Draw planned A* robot navigation paths as thin dotted lines.
+
+        Parameters
+        ----------
+        robot_paths : dict
+            {robot_id: [(x, y), ...]} — the planned path cells.
+        """
+        PATH_CLR = (100, 145, 245)
+        for _rid, path in robot_paths.items():
+            if len(path) < 2:
+                continue
+            for i in range(len(path) - 1):
+                x1, y1 = path[i]
+                x2, y2 = path[i + 1]
+                c1 = (x1 * CELL + CELL // 2, y1 * CELL + CELL // 2)
+                c2 = (x2 * CELL + CELL // 2, y2 * CELL + CELL // 2)
+                if i % 2 == 0:   # dotted effect
+                    pygame.draw.line(self._screen, PATH_CLR, c1, c2, 1)
+            # Draw a small arrowhead at the path's final position
+            if path:
+                ex, ey = path[-1]
+                pygame.draw.circle(
+                    self._screen, PATH_CLR,
+                    (ex * CELL + CELL // 2, ey * CELL + CELL // 2), 4
+                )
+
+    # -----------------------------------------------------------------------
+    # Factory info panel
+    # -----------------------------------------------------------------------
+
+    def _draw_panel_factory(
+        self,
+        products:  dict,
+        workers:   dict,
+        robots:    dict,
+        conveyors: dict,
+        step:      int,
+        order_mgr,
+        extra_info: Optional[dict] = None,
+    ) -> None:
+        """
+        Rich information panel for the warehouse / factory scenario.
+        Activated when extra_info["panel_mode"] == "factory".
+        """
+        cfg = self.factory_cfg
+        px  = cfg.grid.width  * CELL
+        ph  = cfg.grid.height * CELL
+        pygame.draw.rect(self._screen, (18, 22, 32), pygame.Rect(px, 0, PANEL_W, ph))
+
+        y       = 5
+        line_h  = FONT_SIZE + 4
+        line_sm = FONT_SM   + 3
+
+        def txt(s, color=WHITE, small=False):
+            nonlocal y
+            fnt = self._font_sm if small else self._font
+            lh  = line_sm if small else line_h
+            self._screen.blit(fnt.render(str(s), True, color), (px + 6, y))
+            y += lh
+
+        def sep():
+            nonlocal y
+            self._screen.blit(
+                self._font_sm.render("─" * 38, True, (47, 54, 70)), (px + 6, y)
+            )
+            y += line_sm
+
+        def hdg(s, col=(178, 220, 255)):
+            nonlocal y
+            self._screen.blit(self._font_bold.render(s, True, col), (px + 6, y))
+            y += line_h
+
+        def pbar(value, max_val, width=7, full="\u2588", empty="\u2591"):
+            filled = int(min(value / max(max_val, 1e-9), 1.0) * width)
+            return full * filled + empty * (width - filled)
+
+        ei      = extra_info or {}
+        title   = ei.get("title",  cfg.name[:32])
+        solver  = ei.get("solver", "—")
+        reward  = float(ei.get("reward", 0.0))
+        episode = ei.get("episode", "")
+
+        # Reward history for sparkline
+        self._reward_history.append(reward)
+        if len(self._reward_history) > 50:
+            self._reward_history.pop(0)
+
+        step_dur = getattr(getattr(cfg, "sim_params", None), "step_duration_seconds", 5)
+        sim_min  = (step * step_dur) // 60
+        sim_sec  = (step * step_dur) % 60
+
+        # ── Header ──────────────────────────────────────────────────────────
+        hdg("MAS-DUO  Warehouse", (255, 218, 68))
+        txt(f" {title}", (148, 160, 185), small=True)
+        if self.paused:
+            txt("  \u25ae\u25ae PAUSED \u2014 SPACE resumes", (255, 155, 50))
+        sep()
+
+        # ── Status bar ──────────────────────────────────────────────────────
+        ep_str = f"  Ep {episode}" if episode != "" else ""
+        txt(f" Step {step:>4d}   {sim_min:02d}:{sim_sec:02d}{ep_str}")
+        rcol = COLOR_OK if reward >= 0 else COLOR_ALERT
+        txt(f" {solver:<16s}  R: {reward:+.1f}", rcol, small=True)
+        txt(f" FPS target: {self._fps}", (72, 82, 105), small=True)
+        sep()
+
+        # ── Orders ──────────────────────────────────────────────────────────
+        hdg("ORDERS", COLOR_INFO)
+        if order_mgr:
+            for oid, info in order_mgr.get_summary().items():
+                status    = info.get("status", "pending")
+                done_n    = info.get("dispatched", 0)
+                needed    = info.get("needed",    1)
+                deadline  = info.get("deadline",  0)
+                priority  = info.get("priority",  "normal")
+                remaining = deadline - step if deadline else 0
+                bar_s = pbar(done_n, needed, 7)
+                if status == "complete":
+                    col, tag = COLOR_OK,    "DONE"
+                elif remaining < 0 or status == "failed":
+                    col, tag = COLOR_ALERT, "LATE"
+                elif remaining <= 10:
+                    col, tag = COLOR_WARN,  f"T-{remaining:02d}"
+                else:
+                    col = PRIORITY_COLORS.get(priority, COLOR_NEUTRAL)
+                    tag = f"T-{remaining:02d}"
+                txt(f" {oid[-12:]:<12s} [{bar_s}] {done_n}/{needed} {tag}",
+                    col, small=True)
+        sep()
+
+        # ── Products ────────────────────────────────────────────────────────
+        hdg("PRODUCTS", (255, 185, 68))
+        for epc_uri, prod in list(products.items())[:7]:
+            n_done  = prod.route_index
+            n_total = max(len(prod.route), 1)
+            rdots   = ("\u25cf" * min(n_done, n_total)
+                       + "\u25cb" * max(0, n_total - n_done))[:7]
+            if prod.is_dispatched:
+                col, tag = COLOR_OK,   "DONE "
+            elif prod.carried_by:
+                col, tag = COLOR_WARN, f"\u2191{prod.carried_by[-4:]}"
+            else:
+                why = prod._state.why
+                tag = why.name[:5] if hasattr(why, "name") else str(why)[:5]
+                col = COLOR_NEUTRAL
+            short = (prod.epc.short_id[-7:]
+                     if hasattr(prod.epc, "short_id") else epc_uri[-7:])
+            txt(f" {short:<7s} {rdots:<7s} {tag}", col, small=True)
+        if len(products) > 7:
+            txt(f" ... +{len(products) - 7} more", GRAY, small=True)
+        sep()
+
+        # ── Workers ─────────────────────────────────────────────────────────
+        hdg("WORKERS", (138, 222, 138))
+        for wid, w in list(workers.items())[:5]:
+            en_bar = pbar(w.energy, 1.0, 6)
+            col    = (COLOR_ALERT if w.energy < 0.25
+                      else COLOR_WARN if w.energy < 0.55
+                      else COLOR_OK)
+            carry  = w.carrying[-4:] if w.carrying else "  \u2014 "
+            why    = w._state.why
+            action = why.name[:5] if hasattr(why, "name") else str(why)[:5]
+            txt(f" {wid[-7:]:<7s} [{en_bar}] {carry} {action}", col, small=True)
+        sep()
+
+        # ── Robots ──────────────────────────────────────────────────────────
+        hdg("ROBOTS", (118, 148, 255))
+        for rid, r in list(robots.items())[:4]:
+            bat_pct = r.energy / max(r.cfg.energy_capacity, 1)
+            bat_bar = pbar(r.energy, r.cfg.energy_capacity, 6)
+            col     = (COLOR_ALERT if bat_pct < 0.2
+                       else COLOR_WARN if bat_pct < 0.4
+                       else COLOR_OK)
+            carry   = r.carrying[-4:] if r.carrying else "  \u2014 "
+            nav_str = f"\u2192{len(r._path):02d}" if r._path else "idle"
+            txt(f" {rid[-7:]:<7s} [{bat_bar}] {carry} {nav_str}", col, small=True)
+        sep()
+
+        # ── Conveyors ────────────────────────────────────────────────────────
+        hdg("CONVEYORS", (212, 175, 68))
+        for cid, cb in list(conveyors.items())[:6]:
+            occ_bar = pbar(cb.occupancy_fraction, 1.0, 5)
+            state   = "RUN" if cb.is_running else "STP"
+            jam_str = " JAM" if cb.is_jammed else "    "
+            col     = (COLOR_ALERT if cb.is_jammed
+                       else COLOR_OK if cb.is_running
+                       else COLOR_WARN)
+            txt(f" {cid[-7:]:<7s} [{occ_bar}] {state}{jam_str}", col, small=True)
+        sep()
+
+        # ── Reward sparkline ─────────────────────────────────────────────────
+        if len(self._reward_history) >= 3:
+            hdg("REWARD HISTORY", (168, 168, 215))
+            hist  = self._reward_history[-32:]
+            lo, hi = min(hist), max(hist)
+            rng   = max(hi - lo, 1.0)
+            bars  = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+            spark = "".join(
+                bars[min(7, int((v - lo) / rng * 7.99))] for v in hist
+            )
+            rcol = COLOR_OK if hist[-1] >= 0 else COLOR_ALERT
+            txt(f" {spark}", rcol, small=True)
+            txt(f" Now:{hist[-1]:+.1f}  Max:{max(hist):+.1f}  Min:{min(hist):+.1f}",
+                COLOR_NEUTRAL, small=True)
+
+        # ── Controls hint ─────────────────────────────────────────────────────
+        if y < ph - 28:
+            y = ph - 28
+        txt(" SPACE:pause  +/-:speed  Q:quit", (52, 60, 78), small=True)
