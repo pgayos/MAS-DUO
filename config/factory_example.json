@@ -1,0 +1,221 @@
+{
+  "factory": {
+    "id": "FACTORY-001",
+    "name": "Almacén Central Barcelona",
+    "company_prefix": "0614141",
+    "grid": {
+      "width": 20,
+      "height": 15,
+      "cell_size_meters": 1.0
+    },
+    "zones": [
+      { "id": "RECEIVING",   "name": "Entrada de mercancía", "x": 0,  "y": 0,  "width": 3, "height": 15, "type": "input"    },
+      { "id": "STORAGE_A",   "name": "Almacén A",            "x": 3,  "y": 0,  "width": 5, "height": 7,  "type": "storage"  },
+      { "id": "STORAGE_B",   "name": "Almacén B",            "x": 3,  "y": 8,  "width": 5, "height": 7,  "type": "storage"  },
+      { "id": "PROCESSING",  "name": "Zona de proceso",      "x": 8,  "y": 3,  "width": 6, "height": 9,  "type": "process"  },
+      { "id": "PACKING",     "name": "Empaquetado",          "x": 14, "y": 0,  "width": 3, "height": 8,  "type": "packing"  },
+      { "id": "DISPATCH",    "name": "Expedición",           "x": 17, "y": 0,  "width": 3, "height": 15, "type": "output"   },
+      { "id": "CHARGING",    "name": "Zona de carga robots", "x": 14, "y": 9,  "width": 3, "height": 6,  "type": "charging" }
+    ],
+    "conveyor_belts": [
+      {
+        "id": "CB-001",
+        "name": "Cinta entrada → almacén A",
+        "energy_per_step": 0.5,
+        "speed_cells_per_step": 1,
+        "path": [
+          {"x": 2, "y": 3},
+          {"x": 3, "y": 3},
+          {"x": 4, "y": 3},
+          {"x": 5, "y": 3}
+        ],
+        "direction": "east",
+        "capacity": 5
+      },
+      {
+        "id": "CB-002",
+        "name": "Cinta almacén → proceso",
+        "energy_per_step": 0.5,
+        "speed_cells_per_step": 1,
+        "path": [
+          {"x": 7, "y": 5},
+          {"x": 8, "y": 5},
+          {"x": 9, "y": 5},
+          {"x": 10, "y": 5}
+        ],
+        "direction": "east",
+        "capacity": 5
+      },
+      {
+        "id": "CB-003",
+        "name": "Cinta proceso → empaquetado",
+        "energy_per_step": 0.6,
+        "speed_cells_per_step": 1,
+        "path": [
+          {"x": 13, "y": 5},
+          {"x": 14, "y": 5},
+          {"x": 15, "y": 5}
+        ],
+        "direction": "east",
+        "capacity": 3
+      },
+      {
+        "id": "CB-004",
+        "name": "Cinta empaquetado → expedición",
+        "energy_per_step": 0.4,
+        "speed_cells_per_step": 1,
+        "path": [
+          {"x": 16, "y": 3},
+          {"x": 17, "y": 3},
+          {"x": 18, "y": 3}
+        ],
+        "direction": "east",
+        "capacity": 5
+      }
+    ],
+    "robots": [
+      {
+        "id": "ROB-001",
+        "name": "Robot AGV 1",
+        "start_position": {"x": 14, "y": 10},
+        "energy_capacity": 100.0,
+        "energy_per_move": 1.5,
+        "energy_per_lift": 2.0,
+        "speed_cells_per_step": 2,
+        "carrying_capacity": 2,
+        "recharge_rate": 10.0,
+        "recharge_threshold": 20.0
+      },
+      {
+        "id": "ROB-002",
+        "name": "Robot AGV 2",
+        "start_position": {"x": 14, "y": 12},
+        "energy_capacity": 100.0,
+        "energy_per_move": 1.5,
+        "energy_per_lift": 2.0,
+        "speed_cells_per_step": 2,
+        "carrying_capacity": 2,
+        "recharge_rate": 10.0,
+        "recharge_threshold": 20.0
+      }
+    ],
+    "workers": [
+      {
+        "id": "WRK-001",
+        "name": "Operario 1",
+        "start_position": {"x": 9, "y": 5},
+        "role": "processor",
+        "energy_per_action": 0.1,
+        "fatigue_rate": 0.01,
+        "rest_threshold": 0.3,
+        "speed_cells_per_step": 1,
+        "allowed_zones": ["PROCESSING", "STORAGE_A"]
+      },
+      {
+        "id": "WRK-002",
+        "name": "Operario 2",
+        "start_position": {"x": 15, "y": 4},
+        "role": "packer",
+        "energy_per_action": 0.1,
+        "fatigue_rate": 0.01,
+        "rest_threshold": 0.3,
+        "speed_cells_per_step": 1,
+        "allowed_zones": ["PACKING", "DISPATCH"]
+      },
+      {
+        "id": "WRK-003",
+        "name": "Supervisor",
+        "start_position": {"x": 1, "y": 7},
+        "role": "receiver",
+        "energy_per_action": 0.08,
+        "fatigue_rate": 0.008,
+        "rest_threshold": 0.25,
+        "speed_cells_per_step": 1,
+        "allowed_zones": ["RECEIVING", "STORAGE_A", "STORAGE_B"]
+      }
+    ],
+    "product_types": [
+      {
+        "item_reference": "0000001",
+        "name": "Caja pequeña",
+        "size": 1,
+        "weight_kg": 2.0,
+        "requires_processing": true,
+        "processing_steps": ["RECEIVING", "STORAGE_A", "PROCESSING", "PACKING", "DISPATCH"],
+        "process_time_steps": 3
+      },
+      {
+        "item_reference": "0000002",
+        "name": "Caja mediana",
+        "size": 2,
+        "weight_kg": 5.0,
+        "requires_processing": false,
+        "processing_steps": ["RECEIVING", "STORAGE_B", "PACKING", "DISPATCH"],
+        "process_time_steps": 0
+      },
+      {
+        "item_reference": "0000003",
+        "name": "Palet",
+        "size": 4,
+        "weight_kg": 50.0,
+        "requires_processing": false,
+        "processing_steps": ["RECEIVING", "DISPATCH"],
+        "process_time_steps": 0
+      }
+    ],
+    "orders": [
+      {
+        "order_id": "ORD-2026-001",
+        "products": [
+          {"item_reference": "0000001", "quantity": 3},
+          {"item_reference": "0000002", "quantity": 1}
+        ],
+        "deadline_steps": 100,
+        "priority": "high",
+        "destination": "CLIENT-A"
+      },
+      {
+        "order_id": "ORD-2026-002",
+        "products": [
+          {"item_reference": "0000002", "quantity": 2}
+        ],
+        "deadline_steps": 150,
+        "priority": "normal",
+        "destination": "CLIENT-B"
+      }
+    ],
+    "reward_weights": {
+      "on_time_delivery": 100.0,
+      "late_penalty_per_step": -5.0,
+      "energy_penalty": -0.1,
+      "wrong_route_penalty": -10.0,
+      "idle_penalty": -0.5,
+      "partial_order_bonus": 20.0,
+      "full_order_bonus": 50.0
+    },
+    "sim_params": {
+      "max_steps": 500,
+      "step_duration_seconds": 5,
+      "random_order_arrival": false,
+      "order_arrival_rate": 0.05
+    },
+    "global_policy": {
+      "mode": "static",
+      "initial": {
+        "A": 1.0,
+        "B": 1.0,
+        "C": 1.0,
+        "D": 0.5
+      },
+      "scheduled_changes": []
+    },
+    "is_platform": {
+      "max_allowed_cost": 999.0,
+      "max_allowed_delay": 50.0,
+      "production_capacity": 1.0,
+      "min_qos_threshold": 0.2,
+      "client_priority": 0.5,
+      "min_reward_threshold": -15.0
+    }
+  }
+}

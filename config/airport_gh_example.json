@@ -1,0 +1,364 @@
+{
+  "factory": {
+    "id": "AIRPORT-CRC-001",
+    "name": "Aeropuerto Central Ciudad Real — Ground Handling MAS-DUO",
+    "company_prefix": "0614150",
+
+    "grid": {
+      "width": 20,
+      "height": 15,
+      "cell_size_meters": 5.0
+    },
+
+    "zones": [
+      {
+        "id": "HANGAR",
+        "name": "Hangar de recursos GH (Base de equipos)",
+        "x": 0, "y": 0, "width": 4, "height": 15,
+        "type": "storage"
+      },
+      {
+        "id": "TRANSIT",
+        "name": "Calles de rodaje / Acceso airside",
+        "x": 4, "y": 0, "width": 16, "height": 2,
+        "type": "input"
+      },
+      {
+        "id": "PARK1",
+        "name": "Puerta 1 — Stand de estacionamiento",
+        "x": 4, "y": 2, "width": 4, "height": 5,
+        "type": "process"
+      },
+      {
+        "id": "PARK2",
+        "name": "Puerta 2 — Stand de estacionamiento",
+        "x": 8, "y": 2, "width": 4, "height": 5,
+        "type": "process"
+      },
+      {
+        "id": "PARK3",
+        "name": "Puerta 3 — Stand de estacionamiento",
+        "x": 12, "y": 2, "width": 4, "height": 5,
+        "type": "process"
+      },
+      {
+        "id": "PARK4",
+        "name": "Puerta 4 — Stand de estacionamiento",
+        "x": 16, "y": 2, "width": 4, "height": 5,
+        "type": "process"
+      },
+      {
+        "id": "TERMINAL",
+        "name": "Terminal de pasajeros / Zona de salidas",
+        "x": 4, "y": 7, "width": 16, "height": 8,
+        "type": "output"
+      }
+    ],
+
+    "conveyor_belts": [
+      {
+        "id": "BAGBELT-P1",
+        "name": "Cinta de equipaje — Puerta 1 → Terminal",
+        "energy_per_step": 0.3,
+        "speed_cells_per_step": 1,
+        "path": [
+          {"x": 5, "y": 6},
+          {"x": 5, "y": 7},
+          {"x": 5, "y": 8}
+        ],
+        "direction": "top_to_bottom",
+        "capacity": 5
+      },
+      {
+        "id": "BAGBELT-P2",
+        "name": "Cinta de equipaje — Puerta 2 → Terminal",
+        "energy_per_step": 0.3,
+        "speed_cells_per_step": 1,
+        "path": [
+          {"x": 9, "y": 6},
+          {"x": 9, "y": 7},
+          {"x": 9, "y": 8}
+        ],
+        "direction": "top_to_bottom",
+        "capacity": 5
+      },
+      {
+        "id": "BAGBELT-P3",
+        "name": "Cinta de equipaje — Puerta 3 → Terminal",
+        "energy_per_step": 0.3,
+        "speed_cells_per_step": 1,
+        "path": [
+          {"x": 13, "y": 6},
+          {"x": 13, "y": 7},
+          {"x": 13, "y": 8}
+        ],
+        "direction": "top_to_bottom",
+        "capacity": 5
+      }
+    ],
+
+    "robots": [
+      {
+        "id": "PUSHBACK-1",
+        "name": "Remolcador Pushback 1",
+        "start_position": {"x": 1, "y": 2},
+        "energy_capacity": 500.0,
+        "energy_per_move": 2.0,
+        "energy_per_lift": 5.0,
+        "speed_cells_per_step": 2,
+        "carrying_capacity": 1,
+        "recharge_rate": 10.0,
+        "recharge_threshold": 50.0
+      },
+      {
+        "id": "PUSHBACK-2",
+        "name": "Remolcador Pushback 2",
+        "start_position": {"x": 1, "y": 5},
+        "energy_capacity": 500.0,
+        "energy_per_move": 2.0,
+        "energy_per_lift": 5.0,
+        "speed_cells_per_step": 2,
+        "carrying_capacity": 1,
+        "recharge_rate": 10.0,
+        "recharge_threshold": 50.0
+      },
+      {
+        "id": "STAIRS-1",
+        "name": "Escaleras hidráulicas 1 (PAX)",
+        "start_position": {"x": 2, "y": 2},
+        "energy_capacity": 300.0,
+        "energy_per_move": 1.5,
+        "energy_per_lift": 3.0,
+        "speed_cells_per_step": 1,
+        "carrying_capacity": 1,
+        "recharge_rate": 8.0,
+        "recharge_threshold": 40.0
+      },
+      {
+        "id": "STAIRS-2",
+        "name": "Escaleras hidráulicas 2 (PAX)",
+        "start_position": {"x": 2, "y": 5},
+        "energy_capacity": 300.0,
+        "energy_per_move": 1.5,
+        "energy_per_lift": 3.0,
+        "speed_cells_per_step": 1,
+        "carrying_capacity": 1,
+        "recharge_rate": 8.0,
+        "recharge_threshold": 40.0
+      },
+      {
+        "id": "FUEL-TRK-1",
+        "name": "Camión cisterna de combustible",
+        "start_position": {"x": 1, "y": 9},
+        "energy_capacity": 800.0,
+        "energy_per_move": 3.0,
+        "energy_per_lift": 1.0,
+        "speed_cells_per_step": 1,
+        "carrying_capacity": 1,
+        "recharge_rate": 15.0,
+        "recharge_threshold": 80.0
+      },
+      {
+        "id": "CARGO-LOADER-1",
+        "name": "Cargador de contenedores / ULD Loader",
+        "start_position": {"x": 2, "y": 9},
+        "energy_capacity": 400.0,
+        "energy_per_move": 2.5,
+        "energy_per_lift": 6.0,
+        "speed_cells_per_step": 1,
+        "carrying_capacity": 1,
+        "recharge_rate": 10.0,
+        "recharge_threshold": 50.0
+      },
+      {
+        "id": "BUS-PAX-1",
+        "name": "Bus de pasajeros 1",
+        "start_position": {"x": 2, "y": 11},
+        "energy_capacity": 600.0,
+        "energy_per_move": 1.0,
+        "energy_per_lift": 0.5,
+        "speed_cells_per_step": 2,
+        "carrying_capacity": 1,
+        "recharge_rate": 12.0,
+        "recharge_threshold": 60.0
+      },
+      {
+        "id": "BUS-PAX-2",
+        "name": "Bus de pasajeros 2",
+        "start_position": {"x": 2, "y": 13},
+        "energy_capacity": 600.0,
+        "energy_per_move": 1.0,
+        "energy_per_lift": 0.5,
+        "speed_cells_per_step": 2,
+        "carrying_capacity": 1,
+        "recharge_rate": 12.0,
+        "recharge_threshold": 60.0
+      }
+    ],
+
+    "workers": [
+      {
+        "id": "RAMP-AGT-1",
+        "name": "Agente de rampa 1",
+        "start_position": {"x": 1, "y": 1},
+        "role": "ramp_agent",
+        "energy_per_action": 0.5,
+        "fatigue_rate": 0.01,
+        "rest_threshold": 0.3,
+        "speed_cells_per_step": 2,
+        "allowed_zones": ["HANGAR", "TRANSIT", "PARK1", "PARK2", "PARK3", "PARK4"]
+      },
+      {
+        "id": "RAMP-AGT-2",
+        "name": "Agente de rampa 2",
+        "start_position": {"x": 2, "y": 4},
+        "role": "ramp_agent",
+        "energy_per_action": 0.5,
+        "fatigue_rate": 0.01,
+        "rest_threshold": 0.3,
+        "speed_cells_per_step": 2,
+        "allowed_zones": ["HANGAR", "TRANSIT", "PARK1", "PARK2", "PARK3", "PARK4"]
+      },
+      {
+        "id": "RAMP-AGT-3",
+        "name": "Agente de rampa 3",
+        "start_position": {"x": 3, "y": 7},
+        "role": "ramp_agent",
+        "energy_per_action": 0.5,
+        "fatigue_rate": 0.01,
+        "rest_threshold": 0.3,
+        "speed_cells_per_step": 2,
+        "allowed_zones": ["HANGAR", "TRANSIT", "PARK1", "PARK2", "PARK3", "PARK4"]
+      },
+      {
+        "id": "SUPERVISOR-1",
+        "name": "Supervisor de operaciones GH",
+        "start_position": {"x": 5, "y": 9},
+        "role": "supervisor",
+        "energy_per_action": 0.2,
+        "fatigue_rate": 0.005,
+        "rest_threshold": 0.2,
+        "speed_cells_per_step": 3,
+        "allowed_zones": ["TERMINAL", "PARK1", "PARK2", "PARK3", "PARK4", "TRANSIT", "HANGAR"]
+      },
+      {
+        "id": "CREW-CHIEF-1",
+        "name": "Jefe de equipos de tierra",
+        "start_position": {"x": 4, "y": 1},
+        "role": "crew_chief",
+        "energy_per_action": 0.3,
+        "fatigue_rate": 0.008,
+        "rest_threshold": 0.25,
+        "speed_cells_per_step": 2,
+        "allowed_zones": ["HANGAR", "TRANSIT", "PARK1", "PARK2", "PARK3", "PARK4", "TERMINAL"]
+      }
+    ],
+
+    "product_types": [
+      {
+        "item_reference": "B737",
+        "name": "Boeing 737-800 — Transferencia 30 min (Iberia / Vueling)",
+        "size": 5,
+        "weight_kg": 70000.0,
+        "requires_processing": true,
+        "processing_steps": ["TRANSIT", "PARK1", "TERMINAL"],
+        "process_time_steps": 30
+      },
+      {
+        "item_reference": "A320",
+        "name": "Airbus A320 — Transferencia 35 min (Alitalia / Iberia)",
+        "size": 4,
+        "weight_kg": 60000.0,
+        "requires_processing": true,
+        "processing_steps": ["TRANSIT", "PARK2", "TERMINAL"],
+        "process_time_steps": 35
+      },
+      {
+        "item_reference": "LCC",
+        "name": "LCC Genérico — Bajo coste 25 min (Ryanair / EasyJet)",
+        "size": 3,
+        "weight_kg": 48000.0,
+        "requires_processing": true,
+        "processing_steps": ["TRANSIT", "PARK3", "TERMINAL"],
+        "process_time_steps": 25
+      },
+      {
+        "item_reference": "CARGO",
+        "name": "Vuelo de carga — Turnaround 45 min",
+        "size": 6,
+        "weight_kg": 80000.0,
+        "requires_processing": true,
+        "processing_steps": ["TRANSIT", "PARK4", "TERMINAL"],
+        "process_time_steps": 45
+      }
+    ],
+
+    "orders": [
+      {
+        "order_id": "VY-1234",
+        "products": [{"item_reference": "B737", "quantity": 1}],
+        "deadline_steps": 30,
+        "priority": "high",
+        "destination": "TERMINAL"
+      },
+      {
+        "order_id": "IB-4567",
+        "products": [{"item_reference": "A320", "quantity": 1}],
+        "deadline_steps": 45,
+        "priority": "high",
+        "destination": "TERMINAL"
+      },
+      {
+        "order_id": "FR-8901",
+        "products": [{"item_reference": "LCC", "quantity": 1}],
+        "deadline_steps": 30,
+        "priority": "normal",
+        "destination": "TERMINAL"
+      },
+      {
+        "order_id": "UX-2345",
+        "products": [{"item_reference": "CARGO", "quantity": 1}],
+        "deadline_steps": 60,
+        "priority": "low",
+        "destination": "TERMINAL"
+      }
+    ],
+
+    "reward_weights": {
+      "on_time_delivery":    200.0,
+      "late_penalty_per_step": -10.0,
+      "energy_penalty":       -0.1,
+      "wrong_route_penalty":  -20.0,
+      "idle_penalty":          -1.0,
+      "partial_order_bonus":   50.0,
+      "full_order_bonus":     100.0
+    },
+
+    "sim_params": {
+      "max_steps": 120,
+      "step_duration_seconds": 60,
+      "random_order_arrival": false,
+      "order_arrival_rate": 0.0
+    },
+
+    "global_policy": {
+      "mode": "static",
+      "initial": {
+        "A": 0.5,
+        "B": 0.4,
+        "C": 0.0,
+        "D": 0.1
+      },
+      "scheduled_changes": []
+    },
+
+    "is_platform": {
+      "max_allowed_cost":       200.0,
+      "max_allowed_delay":        5.0,
+      "production_capacity":      1.0,
+      "min_qos_threshold":        0.0,
+      "client_priority":          0.5,
+      "min_reward_threshold":    -5.0
+    }
+  }
+}
