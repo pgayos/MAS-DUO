@@ -211,6 +211,22 @@ class FactoryPolicy:
         return 0   # safety fallback
 
 
+def _action_label(agent_type: str, action: Optional[int]) -> str:
+    """Human-readable action for the live decision panel."""
+    if action is None:
+        return "TERMINAL"
+    action_types = {
+        "worker": WorkerAction,
+        "robot": RobotAction,
+        "product": ProductAction,
+        "conveyor": ConveyorAction,
+    }
+    try:
+        return action_types[agent_type](action).name
+    except (KeyError, ValueError):
+        return str(action)
+
+
 # ===========================================================================
 # Demo runner
 # ===========================================================================
@@ -241,21 +257,23 @@ def run_demo(
     trails: dict = defaultdict(lambda: deque(maxlen=TRAIL_LEN))
 
     cumulative_reward = 0.0
-    step_count        = 0
+    agent_turns       = 0
 
     print(f"\n  Warehouse : {env.factory_cfg.name}")
     print(f"  Policy    : {policy.name}")
     print(f"  FPS       : {fps}   Max steps: {max_steps}")
     print(f"  Controls  : SPACE=pause  +/-=speed  Q=quit\n")
 
-    while env.agents and step_count < max_steps:
+    while env.agents and env.simulation_step < max_steps:
         agent = env.agent_selection
         obs, cum_rew, term, trunc, _info = env.last()
 
-        action = policy.select_action(agent, obs, env)
+        action = None if term or trunc else policy.select_action(agent, obs, env)
+        agent_type = env._agent_type(agent)
+        action_name = _action_label(agent_type, action)
         cumulative_reward += cum_rew
         env.step(action)
-        step_count += 1
+        agent_turns += 1
 
         # Update product trails
         for epc_uri, prod in env._products.items():
@@ -277,6 +295,8 @@ def run_demo(
             "trails":      {k: list(v) for k, v in trails.items()},
             "robot_paths": robot_paths,
             "paused":      renderer.paused,
+            "active_agent": agent,
+            "action":       action_name,
         }
 
         renderer.render(
@@ -301,7 +321,8 @@ def run_demo(
     renderer.close()
 
     return {
-        "steps":  step_count,
+        "steps":  snap["simulation_step"],
+        "agent_turns": agent_turns,
         "reward": cumulative_reward,
         "orders": snap["orders"],
         "energy": snap["total_energy_consumed"],

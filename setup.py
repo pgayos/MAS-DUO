@@ -12,7 +12,10 @@ setup(
         "numpy>=1.24.0",
     ],
     extras_require={
-        "render": ["pygame>=2.5.0"],
+        # pygame-ce keeps the public ``pygame`` API and ships wheels for
+        # current Python versions, including Python 3.14 on macOS.
+        "render": ["pygame-ce>=2.5.0"],
         "train":  ["stable-baselines3>=2.2.0", "supersuit>=3.9.0"],
+        "test":   ["pytest>=8.0", "pytest-cov>=5.0"],
     },
 )

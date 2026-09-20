@@ -109,7 +109,9 @@ class LogisticsMaEnv(AECEnv):
         self._order_mgr: Optional[OrderManager]   = None
         self._grid:      Optional[GridWorld]       = None
         self._step_count: int = 0
+        self._agent_turn_count: int = 0
         self._total_energy: float = 0.0
+        self._rng: np.random.Generator = np.random.default_rng()
         # IS Platform and global policy (MAS-DUO Section 3.3)
         self._is_platform: Optional[ISPlatform] = None
         self._global_policy: Optional[GlobalPolicy] = None
@@ -171,14 +173,14 @@ class LogisticsMaEnv(AECEnv):
         seed: Optional[int] = None,
         options: Optional[dict] = None,
     ) -> None:
-        if seed is not None:
-            np.random.seed(seed)
+        self._rng = np.random.default_rng(seed)
 
         cfg = self.factory_cfg
 
         # ── Grid ────────────────────────────────────────────────────────────
         self._grid  = GridWorld(cfg)
         self._step_count  = 0
+        self._agent_turn_count = 0
         self._total_energy = 0.0
 
         # ── Order manager + EPCs ────────────────────────────────────────────
@@ -203,6 +205,7 @@ class LogisticsMaEnv(AECEnv):
                 deadline=order_cfg.deadline_steps,
             )
             self._products[epc.pure_identity_uri] = agent
+            agent.seed(int(self._rng.integers(0, np.iinfo(np.uint32).max)))
             self._grid.place_agent(epc.pure_identity_uri, start_pos)
 
         # ── Workers ─────────────────────────────────────────────────────────
@@ -277,6 +280,9 @@ class LogisticsMaEnv(AECEnv):
             atype = self._agent_type(aid)
             self.observation_spaces[aid] = self._cached_obs_space(atype)
             self.action_spaces[aid]      = self._cached_act_space(atype)
+            self.action_spaces[aid].seed(
+                int(self._rng.integers(0, np.iinfo(np.uint32).max))
+            )
 
         self.rewards            = {a: 0.0   for a in self.agents}
         self._cumulative_rewards= {a: 0.0   for a in self.agents}
@@ -305,12 +311,14 @@ class LogisticsMaEnv(AECEnv):
             return
 
         self._cumulative_rewards[agent_id] = 0.0
+        self._clear_rewards()
 
         grid_state = self._build_grid_state()
         atype      = self._agent_type(agent_id)
         agent_obj  = self._get_agent_obj(agent_id)
 
         result = agent_obj.step(action, grid_state, self._step_count)
+        self._agent_turn_count += 1
         step_reward = result.get("reward", 0.0)
 
         # ── Negotiation with IS Platform (MAS-DUO Section 3.7.5) ────────────
@@ -326,7 +334,6 @@ class LogisticsMaEnv(AECEnv):
         step_reward += self.factory_cfg.reward_weights.energy_penalty * energy_delta
 
         self.rewards[agent_id] = step_reward
-        self._cumulative_rewards[agent_id] += step_reward
 
         # Terminate agent if dispatched (product)
         if atype == "product" and agent_obj.is_dispatched:
@@ -336,6 +343,7 @@ class LogisticsMaEnv(AECEnv):
         if self._agent_selector.is_last():
             self._end_of_round()
 
+        self._accumulate_rewards()
         self.agent_selection = self._agent_selector.next()
 
         if self.render_mode == "human":
@@ -383,7 +391,11 @@ class LogisticsMaEnv(AECEnv):
         )
 
         # If Expert System suggests a new policy → propagate it
-        if neg_result.new_policy is not None:
+        if (
+            neg_result.new_policy is not None
+            and self._global_policy is not None
+            and self._global_policy.mode == PolicyMode.DYNAMIC
+        ):
             np_ = neg_result.new_policy
             for prod in self._products.values():
                 prod.set_policy_params(np_.A, np_.B, np_.C, np_.D)
@@ -441,11 +453,8 @@ class LogisticsMaEnv(AECEnv):
             for aid in self.agents:
                 self.terminations[aid] = True
 
-        # Eliminar agentes muertos de la lista activa
-        self.agents = [
-            a for a in self.agents
-            if not self.terminations.get(a) and not self.truncations.get(a)
-        ]
+        # Dead agents remain until PettingZoo consumes their required
+        # ``step(None)`` turn through ``_was_dead_step``.
 
     def _handle_product_reach_end_conveyor(self, cb: ConveyorAgent, epc_uri: str) -> None:
         """When a product exits a conveyor, advances its state along the route."""
@@ -670,6 +679,8 @@ class LogisticsMaEnv(AECEnv):
         """
         return {
             "step": self._step_count,
+            "simulation_step": self._step_count,
+            "agent_turns": self._agent_turn_count,
             "products":  {aid: a.state.to_dict() for aid, a in self._products.items()},
             "workers":   {aid: a.state.to_dict() for aid, a in self._workers.items()},
             "robots":    {aid: a.state.to_dict() for aid, a in self._robots.items()},
@@ -690,3 +701,13 @@ class LogisticsMaEnv(AECEnv):
                 if self._global_policy else {}
             ),
         }
+
+    @property
+    def simulation_step(self) -> int:
+        """Completed environment cycles; this is the operational clock."""
+        return self._step_count
+
+    @property
+    def agent_turns(self) -> int:
+        """Number of individual AEC agent actions since the last reset."""
+        return self._agent_turn_count

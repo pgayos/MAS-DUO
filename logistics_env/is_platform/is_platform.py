@@ -232,6 +232,7 @@ class CRMAgent(ISBDIAgent):
         super().__init__(agent_id="IS-CRM-001", name="CRM Agent")
         self._beliefs = {
             "client_priorities":  {},   # {order_id: priority (0-1)}
+            "default_client_priority": 0.5,
             "min_qos_threshold":  0.0,  # minimum acceptable QoS
             "client_satisfaction": 1.0, # current global satisfaction
         }
@@ -252,7 +253,7 @@ class CRMAgent(ISBDIAgent):
         # Adjust threshold by order priority
         if proposal.order_id:
             priority = self._beliefs["client_priorities"].get(
-                proposal.order_id, 0.5
+                proposal.order_id, self._beliefs["default_client_priority"]
             )
             # Clientes de alta prioridad requieren mejor QoS
             adjusted_min = min_qos + priority * 0.2
@@ -270,8 +271,13 @@ class CRMAgent(ISBDIAgent):
         """Establece la prioridad de un cliente/pedido [0, 1]."""
         self._beliefs["client_priorities"][order_id] = max(0.0, min(1.0, priority))
 
-    def configure(self, min_qos: float = 0.0) -> None:
+    def configure(
+        self, min_qos: float = 0.0, default_client_priority: float = 0.5
+    ) -> None:
         self._beliefs["min_qos_threshold"] = min_qos
+        self._beliefs["default_client_priority"] = max(
+            0.0, min(1.0, default_client_priority)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -458,21 +464,21 @@ class ISPlatform:
                 rejected_proposal=proposal,
                 current_policy=self.global_policy,
             )
-            # In DYNAMIC mode, update the global policy
+            # In DYNAMIC mode, update and return the global policy. In STATIC
+            # mode the suggestion remains diagnostic and must never leak into
+            # physical agents as a transient policy.
+            applied_policy = None
             if self.global_policy.mode.value == "dynamic":
-                try:
-                    self.global_policy.update(
-                        step=step,
-                        A=new_policy.A, B=new_policy.B,
-                        C=new_policy.C, D=new_policy.D,
-                        reason="ExpertSystem adjustment after rejection",
-                    )
-                except ValueError:
-                    pass  # modo STATIC protegido
+                applied_policy = self.global_policy.update(
+                    step=step,
+                    A=new_policy.A, B=new_policy.B,
+                    C=new_policy.C, D=new_policy.D,
+                    reason="ExpertSystem adjustment after rejection",
+                )
 
             result = NegotiationResult(
                 outcome     = NegotiationOutcome.REJECTED,
-                new_policy  = new_policy,
+                new_policy  = applied_policy,
                 approved_by = approved_by,
                 message     = "; ".join(reasons),
             )
@@ -576,7 +582,9 @@ class ISPlatform:
         client_priority: float = 1.0,
         **client_priorities,
     ) -> None:
-        self.crm_agent.configure(min_qos=min_qos)
+        self.crm_agent.configure(
+            min_qos=min_qos, default_client_priority=client_priority
+        )
         for order_id, priority in client_priorities.items():
             self.crm_agent.set_client_priority(order_id, priority)
 

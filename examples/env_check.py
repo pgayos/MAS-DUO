@@ -63,18 +63,17 @@ def main():
         print(f"    Deadline : step {info['deadline']}")
         print()
 
-    # Ejecutar 5 pasos aleatorios
+    # Ejecutar 5 turnos de agente aleatorios
     print(f"\n{'─'*70}")
-    print(f" FIRST 5 STEPS (random actions)")
+    print(f" FIRST 5 AGENT TURNS (random actions)")
     print(f"{'─'*70}\n")
 
-    import numpy as np
     for i in range(5):
         if not env.agents:
             break
         agent = env.agent_selection
         obs, rew, term, trunc, info = env.last()
-        action = env.action_space(agent).sample()
+        action = None if term or trunc else env.action_space(agent).sample()
         env.step(action)
         atype = env._agent_type(agent) if agent in (
             list(env._products) + list(env._workers) +
