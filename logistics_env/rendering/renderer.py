@@ -349,6 +349,26 @@ class LogisticsRenderer:
             txt(f" Politica: {policy}", COLOR_NEUTRAL, small=True)
         sep()
 
+        # Executive snapshot and current decision make the simulation easier
+        # to follow in a presentation without understanding every agent icon.
+        summaries = order_mgr.get_summary() if order_mgr else {}
+        completed = sum(1 for item in summaries.values() if item.get("status") == "complete")
+        avg_energy = (
+            sum(r.energy_fraction for r in robots.values()) / len(robots)
+            if robots else 0.0
+        )
+        txt(
+            f" KPI  Orders {completed}/{len(summaries)}  "
+            f"Battery {avg_energy * 100:>3.0f}%  Agents {len(workers) + len(robots)}",
+            COLOR_OK if completed else COLOR_INFO,
+            small=True,
+        )
+        active = ei.get("active_agent")
+        action = ei.get("action")
+        if active or action:
+            txt(f" LIVE {str(active)[-13:]:<13s} > {str(action)[:15]}", COLOR_WARN, small=True)
+        sep()
+
         # ── Vuelos / Pedidos ──────────────────────────────────────────────────
         heading("FLIGHTS", COLOR_INFO)
         if order_mgr:
@@ -631,6 +651,20 @@ class LogisticsRenderer:
         txt(f" FPS target: {self._fps}", (72, 82, 105), small=True)
         sep()
 
+        summaries = order_mgr.get_summary() if order_mgr else {}
+        completed = sum(1 for item in summaries.values() if item.get("status") == "complete")
+        active_resources = len(workers) + len(robots) + len(conveyors)
+        txt(
+            f" KPI  Orders {completed}/{len(summaries)}  Resources {active_resources}",
+            COLOR_OK if completed else COLOR_INFO,
+            small=True,
+        )
+        active = ei.get("active_agent")
+        action = ei.get("action")
+        if active or action:
+            txt(f" LIVE {str(active)[-12:]:<12s} > {str(action)[:16]}", COLOR_WARN, small=True)
+        sep()
+
         # ── Orders ──────────────────────────────────────────────────────────
         hdg("ORDERS", COLOR_INFO)
         if order_mgr:
@@ -657,7 +691,7 @@ class LogisticsRenderer:
 
         # ── Products ────────────────────────────────────────────────────────
         hdg("PRODUCTS", (255, 185, 68))
-        for epc_uri, prod in list(products.items())[:7]:
+        for epc_uri, prod in list(products.items())[:5]:
             n_done  = prod.route_index
             n_total = max(len(prod.route), 1)
             rdots   = ("\u25cf" * min(n_done, n_total)
@@ -673,13 +707,13 @@ class LogisticsRenderer:
             short = (prod.epc.short_id[-7:]
                      if hasattr(prod.epc, "short_id") else epc_uri[-7:])
             txt(f" {short:<7s} {rdots:<7s} {tag}", col, small=True)
-        if len(products) > 7:
-            txt(f" ... +{len(products) - 7} more", GRAY, small=True)
+        if len(products) > 5:
+            txt(f" ... +{len(products) - 5} more", GRAY, small=True)
         sep()
 
         # ── Workers ─────────────────────────────────────────────────────────
         hdg("WORKERS", (138, 222, 138))
-        for wid, w in list(workers.items())[:5]:
+        for wid, w in list(workers.items())[:4]:
             en_bar = pbar(w.energy, 1.0, 6)
             col    = (COLOR_ALERT if w.energy < 0.25
                       else COLOR_WARN if w.energy < 0.55
@@ -705,7 +739,7 @@ class LogisticsRenderer:
 
         # ── Conveyors ────────────────────────────────────────────────────────
         hdg("CONVEYORS", (212, 175, 68))
-        for cid, cb in list(conveyors.items())[:6]:
+        for cid, cb in list(conveyors.items())[:4]:
             occ_bar = pbar(cb.occupancy_fraction, 1.0, 5)
             state   = "RUN" if cb.is_running else "STP"
             jam_str = " JAM" if cb.is_jammed else "    "

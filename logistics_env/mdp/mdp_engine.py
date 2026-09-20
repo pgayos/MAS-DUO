@@ -78,12 +78,14 @@ class MDPEngine:
         gamma:           float = 0.95,
         alpha:           float = 0.1,
         epsilon:         float = 0.1,
+        seed:            Optional[int] = None,
     ):
         self.states:          List[MDPState]  = states
         self.reward_matrices: RewardMatrices  = reward_matrices
         self.gamma:           float           = gamma
         self.alpha:           float           = alpha
         self.epsilon:         float           = epsilon
+        self._rng:            np.random.Generator = np.random.default_rng(seed)
 
         self.n_states: int = len(states)
 
@@ -148,12 +150,16 @@ class MDPEngine:
             return None
 
         # ε-greedy exploration (learning model, Sec 3.7.4)
-        if np.random.random() < self.epsilon:
-            chosen_idx = np.random.choice(list(q_values.keys()))
+        if self._rng.random() < self.epsilon:
+            chosen_idx = self._rng.choice(list(q_values.keys()))
         else:
             chosen_idx = max(q_values, key=lambda k: q_values[k])
 
         return self.states[chosen_idx]
+
+    def seed(self, seed: Optional[int] = None) -> None:
+        """Resets the engine-local random generator for reproducible runs."""
+        self._rng = np.random.default_rng(seed)
 
     # -----------------------------------------------------------------------
     # Q-learning update (post-execution)

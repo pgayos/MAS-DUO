@@ -10,7 +10,7 @@ Runs a ground handling simulation with:
   · Side panel with real-time flight status
   · Final performance summary vs. random baseline
 
-Based on the doctoral thesis of Pablo García Ansola (2024):
+Based on the doctoral thesis of Pablo García Ansola (2012):
   Chapter 4.1 — Ciudad Real Central Airport
   Equation 12 — Reward = 0.5·Delay + 0.4·Cost + 0.0·QoS + 0.1·Energy
 
@@ -274,7 +274,7 @@ def print_banner():
     print("\n" + "═" * 68)
     print("  MAS-DUO ✈  Ground Handling Demo — Ciudad Real Central Airport")
     print("  Policy: Greedy EDF (Earliest Deadline First)")
-    print("  Thesis: Pablo García Ansola (2024), Ch. 4.1 — Equation 12")
+    print("  Thesis: Pablo García Ansola (2012), Ch. 4.1 — Equation 12")
     print("  Reward = 0.5·Delay + 0.4·Cost + 0.0·QoS + 0.1·Energy")
     print("═" * 68)
     print()
@@ -452,11 +452,24 @@ def run_demo(
 
             # Select greedy action
             action = policy.select_action(agent_id, obs, raw_env)
+            action_types = {
+                "worker": WorkerAction,
+                "robot": RobotAction,
+                "product": ProductAction,
+                "conveyor": ConveyorAction,
+            }
+            agent_type = raw_env._agent_type(agent_id)
+            try:
+                action_name = action_types[agent_type](action).name
+            except (KeyError, ValueError):
+                action_name = str(action)
             raw_env.step(action)
             cum_reward += reward
 
             # Update renderer info
             extra_info["reward"] = cum_reward
+            extra_info["active_agent"] = agent_id
+            extra_info["action"] = action_name
 
             # Render con info extra aeroportuaria
             if not headless and raw_env._renderer is not None:

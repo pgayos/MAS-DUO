@@ -22,22 +22,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from logistics_env import LogisticsMaEnv
 
 
-def run_episode(env: LogisticsMaEnv, max_steps: int) -> dict:
+def run_episode(env: LogisticsMaEnv, seed: int) -> dict:
     """Runs one episode with random policy."""
-    env.reset(seed=np.random.randint(0, 10000))
+    env.reset(seed=seed)
 
     total_rewards = {}
     step_count    = 0
     start_time    = time.time()
 
-    while env.agents and step_count < max_steps:
+    while env.agents:
         agent = env.agent_selection
 
         # Random policy
         act_space = env.action_space(agent)
-        action    = act_space.sample()
-
         obs, rew, term, trunc, info = env.last()
+        action = None if term or trunc else act_space.sample()
         env.step(action)
 
         total_rewards[agent]  = total_rewards.get(agent, 0.0) + rew
@@ -47,7 +46,8 @@ def run_episode(env: LogisticsMaEnv, max_steps: int) -> dict:
     snapshot = env.state_snapshot
 
     return {
-        "steps":           step_count,
+        "steps":           env.simulation_step,
+        "agent_turns":     step_count,
         "elapsed_sec":     elapsed,
         "total_rewards":   total_rewards,
         "order_summary":   snapshot["orders"],
@@ -66,6 +66,7 @@ def main():
     parser.add_argument("--config",   type=str, default="config/factory_example.json")
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--render",   action="store_true", help="Renderizar con Pygame")
+    parser.add_argument("--seed",     type=int, default=7)
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -74,8 +75,6 @@ def main():
 
     render_mode = "human" if args.render else None
     env = LogisticsMaEnv(config_path=config_path, render_mode=render_mode)
-    max_steps = env.factory_cfg.sim_params.max_steps
-
     print(f"\n{'='*60}")
     print(f"  MAS-DUO — Multi-Agent Logistics Environment")
     print(f"  Factory  : {env.factory_cfg.name}")
@@ -90,7 +89,7 @@ def main():
 
     for ep in range(args.episodes):
         print(f"── Episode {ep+1}/{args.episodes} ──")
-        result = run_episode(env, max_steps)
+        result = run_episode(env, seed=args.seed + ep)
         all_results.append(result)
 
         print(f"  Steps       : {result['steps']}")

@@ -3,7 +3,7 @@
 Python implementation of the **MAS-DUO** multi-agent system described in the doctoral thesis:
 
 > **"Improving the Decision Support in Shop Floor Operations by Using Agent-based Systems and Visibility Frameworks"**
-> Pablo García Ansola — University of Castilla-La Mancha (UCLM), 2024
+> Pablo García Ansola — University of Castilla-La Mancha (UCLM), 2012
 
 The system models production and logistics environments (factory, airport) as **PettingZoo AEC** environments where multiple agent types with **4W state** (What/Where/When/Why) collaborate to optimise orders/services under a configurable global policy.
 
@@ -99,15 +99,16 @@ MAS-DUO/
 │   │
 │   ├── is_platform/
 │   │   ├── __init__.py             # Exports ISPlatform, GlobalPolicy, PolicyParameters
-│   │   ├── is_platform.py          # ISPlatform: ERP, CRM, Expert System
 │   │   ├── global_policy.py        # GlobalPolicy and PolicyParameters
-│   │   └── negotiation.py          # NegotiationProposal, NegotiationResult
+│   │   └── is_platform.py          # IS agents and negotiation data structures
 │   │
 │   └── rendering/
 │       └── renderer.py             # LogisticsRenderer (Pygame)
 │
 ├── train/
-│   └── train_random.py             # Training with random policy
+│   ├── train_random.py             # Random baseline
+│   └── train_ql.py                 # Tabular Q-learning baseline
+├── tests/                          # Unit and PettingZoo compliance tests
 │
 ├── setup.py
 └── requirements.txt
@@ -235,7 +236,7 @@ Each `ProductAgent` (and optionally other agent types) implements a **BDI** (Bel
 ```
 Observation → Beliefs (GeneratedBelief) → Desires → Intentions
                          ↓
-              MDPEngine.step(state, action)
+              MDPEngine.select_action(...) / update_q(...)
                          ↓
               Reward R(s,s') = f(A, B, C, D)
                          ↓
@@ -480,6 +481,17 @@ The entire scenario is defined in a single JSON file. Full structure:
 
 The environment follows the PettingZoo **AEC** (Agent-Environment-Cycle) API:
 
+### Time model
+
+MAS-DUO distinguishes two counters:
+
+- `agent_turns`: individual actions submitted through the AEC API.
+- `simulation_step`: completed cycles in which every active agent had a turn.
+
+Deadlines, scheduled policy changes and `step_duration_seconds` use
+`simulation_step`. Training loops must therefore terminate on environment
+`truncations`, not after `max_steps` individual actions.
+
 ```python
 from logistics_env import LogisticsMaEnv
 
@@ -506,7 +518,7 @@ while env.agents:
 
 # State snapshot
 snapshot = env.state_snapshot
-# → {"step": N, "products": {...}, "robots": {...}, "orders": {...}, ...}
+# → {"simulation_step": N, "agent_turns": M, "products": {...}, ...}
 
 env.close()
 ```
@@ -528,6 +540,8 @@ Property returning the complete serialisable state:
 snapshot = env.state_snapshot
 # {
 #   "step": 15,
+#   "simulation_step": 15,
+#   "agent_turns": 225,
 #   "products":  { "urn:epc:...": {"what": ..., "where": ..., "when": ..., "why": ..., "zone_id": ...} },
 #   "workers":   { "RAMP-1":      {...} },
 #   "robots":    { "PUSHBACK-1":  {...} },
@@ -600,10 +614,32 @@ renderer.render(
 The right-hand panel (360 px) displays in real time:
 
 - **Header:** scenario name, simulated clock (`T+hh:mm`), step, cumulative reward, active solver
+- **Executive view:** completed orders, active resources, battery and the agent/action currently being executed
 - **FLIGHTS:** status of each order — time remaining to deadline (`T-XX`), completed (`OK`), delayed (`DELAY`), priority `[H/N/L]`, progress bar
 - **EQUIPMENT:** list of robots with battery bar and carried load
 - **PERSONNEL:** list of workers with energy level
 - **BELTS:** state (RUN/STOP) and products in transit
+
+### Live training dashboard
+
+The tabular Q-Learning trainer includes an optional presentation mode with
+episode progress, reward and moving-average curves, order completion, exploration,
+Q-table growth and agent/cycle counters:
+
+```bash
+python train/train_ql.py --episodes 60 --visualize
+```
+
+The dashboard does not change the learning algorithm and is disabled by default,
+so automated runs remain headless. Controls: `SPACE` pauses, `+/-` changes the
+display rate, `S` saves a screenshot under `artifacts/screenshots`, and `Q` closes it.
+
+Once a policy has been trained, use the same visual language for the operational
+simulation:
+
+```bash
+python examples/factory_demo.py --policy train/ql_policy.pkl --fps 4
+```
 
 ---
 
@@ -684,7 +720,7 @@ python examples/airport_gh_check.py
    - Active baggage belts
    - Scheduled flights with deadline and status
 6. **IS Platform status** — global policy, negotiations, approval rate.
-7. **Simulates 10 steps** with random actions (`env.action_space(agent).sample()`), showing rewards and IS negotiations when they occur.
+7. **Simulates 10 environment cycles** with random actions, showing rewards and IS negotiations when they occur.
 8. **Final summary** — energy consumed, flight-by-flight status, IS platform status.
 
 #### Expected output (excerpt)
@@ -849,7 +885,7 @@ Rules per agent type:
 ================================================================
   MAS-DUO  Ground Handling Demo -- Ciudad Real Central Airport
   Policy: Greedy EDF (Earliest Deadline First)
-  Thesis: Pablo Garcia Ansola (2024), Ch. 4.1 -- Equation 12
+  Thesis: Pablo Garcia Ansola (2012), Ch. 4.1 -- Equation 12
   Reward = 0.5*Delay + 0.4*Cost + 0.0*QoS + 0.1*Energy
 ================================================================
 
@@ -930,6 +966,8 @@ Main class `LogisticsMaEnv(AECEnv)`:
 | `render()` | Draws a pygame frame if `render_mode="human"` |
 | `close()` | Shuts down the renderer |
 | `_step_count` | Current simulation step |
+| `simulation_step` | Public operational clock: completed AEC cycles |
+| `agent_turns` | Number of individual agent actions since reset |
 | `_total_energy` | Cumulative total energy consumed |
 | `factory_cfg` | `FactoryConfig` object (loaded from JSON) |
 | `_products / _workers / _robots / _conveyors` | Agent dictionaries |
@@ -988,6 +1026,14 @@ grid.conveyor_at(pos)      # -> str (conveyor_id) or None
 
 ## Quick Reference — Commands
 
+Run the complete regression and PettingZoo API suite:
+
+```bash
+python -m unittest discover -s tests -v
+# or, with the test extra installed
+pytest
+```
+
 ```bash
 # Activate virtual environment
 source .venv/bin/activate
@@ -1010,10 +1056,16 @@ python examples/airport_gh_demo.py \
 
 # Validate generic factory environment
 python examples/env_check.py
+
+# Reproducible Q-learning baseline
+python train/train_ql.py --episodes 60 --seed 7
+
+# Reproducible random baseline
+python train/train_random.py --episodes 3 --seed 7
 ```
 
 ---
 
 ## Licence and Authorship
 
-Implementation based on the MAS-DUO architecture described in the doctoral thesis of **Pablo Garcia Ansola** (UCLM, 2024). The code is a reference implementation of the system described in Chapters 3 (BDI/MDP/IS architecture) and 4.1 (airport use case).
+Implementation based on the MAS-DUO architecture described in the doctoral thesis of **Pablo Garcia Ansola** (UCLM, 2012). The code is a reference implementation of the system described in Chapters 3 (BDI/MDP/IS architecture) and 4.1 (airport use case).

@@ -1,6 +1,6 @@
 gymnasium>=0.29.0
 pettingzoo>=1.24.0
 numpy>=1.24.0
-pygame>=2.5.0
+pygame-ce>=2.5.0
 stable-baselines3>=2.2.0
 supersuit>=3.9.0

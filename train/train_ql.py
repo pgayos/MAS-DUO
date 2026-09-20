@@ -27,7 +27,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -136,19 +136,22 @@ _FIXED_ACTIONS = {
 class QTableAgent:
     """Stores the Q-table and implements epsilon-greedy action selection."""
 
-    def __init__(self, n_actions: int):
+    def __init__(self, n_actions: int, seed: int | None = None):
         self.n_actions   = n_actions
         self.Q: Dict     = defaultdict(lambda: {a: 0.0 for a in range(n_actions)})
         self.n_updates   = 0
         self.total_reward = 0.0
+        self.rng = np.random.default_rng(seed)
 
     def select(self, state: tuple, epsilon: float) -> int:
-        if np.random.random() < epsilon:
-            return np.random.randint(self.n_actions)
+        if self.rng.random() < epsilon:
+            return int(self.rng.integers(self.n_actions))
         return max(self.Q[state], key=self.Q[state].get)
 
-    def update(self, s: tuple, a: int, r: float, s_next: tuple) -> None:
-        q_next  = max(self.Q[s_next].values())
+    def update(
+        self, s: tuple, a: int, r: float, s_next: tuple | None, terminal: bool = False
+    ) -> None:
+        q_next  = 0.0 if terminal or s_next is None else max(self.Q[s_next].values())
         old_q   = self.Q[s][a]
         self.Q[s][a] = old_q + ALPHA * (r + GAMMA * q_next - old_q)
         self.n_updates    += 1
@@ -158,7 +161,12 @@ class QTableAgent:
 # Training loop
 # ---------------------------------------------------------------------------
 
-def train(env: LogisticsMaEnv, n_episodes: int) -> dict:
+def train(
+    env: LogisticsMaEnv,
+    n_episodes: int,
+    seed: int = 7,
+    progress_callback: Optional[Callable[[dict], bool | None]] = None,
+) -> dict:
     """
     Runs the Q-Learning training loop and returns results dict.
     """
@@ -166,13 +174,14 @@ def train(env: LogisticsMaEnv, n_episodes: int) -> dict:
     max_steps = cfg.sim_params.max_steps
 
     # Q-tables — workers are the primary learning agents
-    q_worker  = QTableAgent(n_actions=10)   # 10 WorkerActions
+    q_worker  = QTableAgent(n_actions=10, seed=seed)   # 10 WorkerActions
 
     # Per-agent memory: {agent_id: (prev_discrete_state, prev_action)}
     memory: Dict = {}
 
     episode_rewards:    list = []
     episode_lengths:    list = []
+    episode_agent_turns: list = []
     order_completions:  list = []
 
     # Epsilon decay schedule: linear over ~80 % of training
@@ -191,14 +200,13 @@ def train(env: LogisticsMaEnv, n_episodes: int) -> dict:
         frac    = ep / max(decay_episodes, 1)
         epsilon = max(EPSILON_MIN, EPSILON_0 - frac * (EPSILON_0 - EPSILON_MIN))
 
-        env.reset(seed=ep * 13 + 7)
+        env.reset(seed=seed + ep * 13)
         memory.clear()
 
         ep_reward  = 0.0
-        step_count = 0
         t0         = time.time()
 
-        while env.agents and step_count < max_steps:
+        while env.agents:
             agent = env.agent_selection
             obs, cum_rew, term, trunc, _info = env.last()
 
@@ -207,9 +215,19 @@ def train(env: LogisticsMaEnv, n_episodes: int) -> dict:
             s_prime = disc_fn(obs)
 
             # Q-update for this agent using its accumulated reward since last visit
-            if agent in memory and not term and not trunc and atype == "worker":
+            if agent in memory and atype == "worker":
                 s_prev, a_prev = memory[agent]
-                q_worker.update(s_prev, a_prev, cum_rew, s_prime)
+                q_worker.update(
+                    s_prev, a_prev, cum_rew, s_prime,
+                    terminal=term or trunc,
+                )
+
+            ep_reward += cum_rew
+
+            if term or trunc:
+                memory.pop(agent, None)
+                env.step(None)
+                continue
 
             # Action selection
             if atype == "worker":
@@ -219,9 +237,6 @@ def train(env: LogisticsMaEnv, n_episodes: int) -> dict:
 
             # Store this step's state for next update
             memory[agent] = (s_prime, action)
-            ep_reward    += cum_rew
-            step_count   += 1
-
             env.step(action)
 
         ep_done = sum(
@@ -229,12 +244,34 @@ def train(env: LogisticsMaEnv, n_episodes: int) -> dict:
             if v["status"] == "complete"
         )
         episode_rewards.append(ep_reward)
-        episode_lengths.append(step_count)
+        episode_lengths.append(env.simulation_step)
+        episode_agent_turns.append(env.agent_turns)
         order_completions.append(ep_done)
+
+        # Presentation/UI integration point.  Keeping this callback generic
+        # means the trainer remains usable without pygame and with other UIs.
+        w5 = episode_rewards[max(0, ep - 4): ep + 1]
+        if progress_callback is not None:
+            keep_training = progress_callback({
+                "episode": ep + 1,
+                "total_episodes": n_episodes,
+                "reward": ep_reward,
+                "moving_average": float(np.mean(w5)),
+                "epsilon": epsilon,
+                "completed_orders": ep_done,
+                "cycles": env.simulation_step,
+                "agent_turns": env.agent_turns,
+                "q_states": len(q_worker.Q),
+                "q_updates": q_worker.n_updates,
+                "factory_name": cfg.name,
+                "algorithm": "Q-Learning tabular · workers",
+                "episode_seconds": time.time() - t0,
+            })
+            if keep_training is False:
+                break
 
         # Print progress every 5 episodes
         if (ep + 1) % 5 == 0 or ep == 0:
-            w5    = episode_rewards[max(0, ep - 4): ep + 1]
             avg5  = np.mean(w5)
             fill  = int((ep + 1) / n_episodes * 28)
             bar   = "█" * fill + "░" * (28 - fill)
@@ -252,11 +289,13 @@ def train(env: LogisticsMaEnv, n_episodes: int) -> dict:
         "Q_workers":         dict(q_worker.Q),
         "episode_rewards":   episode_rewards,
         "episode_lengths":   episode_lengths,
+        "episode_agent_turns": episode_agent_turns,
         "order_completions": order_completions,
-        "n_episodes":        n_episodes,
+        "n_episodes":        len(episode_rewards),
         "factory_name":      cfg.name,
         "alpha":             ALPHA,
         "gamma":             GAMMA,
+        "seed":              seed,
     }
 
 # ---------------------------------------------------------------------------
@@ -316,6 +355,18 @@ def main() -> None:
         "--out", type=str, default="train/ql_policy.pkl",
         help="Output path for the trained policy pickle."
     )
+    parser.add_argument(
+        "--seed", type=int, default=7,
+        help="Base seed for reproducible environment and exploration RNGs."
+    )
+    parser.add_argument(
+        "--visualize", action="store_true",
+        help="Show the live client-facing training dashboard."
+    )
+    parser.add_argument(
+        "--visual-fps", type=int, default=12,
+        help="Dashboard refresh speed (default 12 episodes/second)."
+    )
     args = parser.parse_args()
 
     root        = Path(__file__).parent.parent
@@ -323,8 +374,19 @@ def main() -> None:
     if not config_path.is_absolute():
         config_path = root / config_path
 
-    env     = LogisticsMaEnv(config_path=config_path, render_mode=None)
-    results = train(env, n_episodes=args.episodes)
+    dashboard = None
+    if args.visualize:
+        from logistics_env.rendering import TrainingRenderer
+        dashboard = TrainingRenderer(
+            fps=args.visual_fps,
+            screenshot_dir=root / "artifacts" / "screenshots",
+        )
+
+    env = LogisticsMaEnv(config_path=config_path, render_mode=None)
+    results = train(
+        env, n_episodes=args.episodes, seed=args.seed,
+        progress_callback=dashboard.update if dashboard else None,
+    )
     env.close()
 
     print_summary(results)
@@ -346,6 +408,7 @@ def main() -> None:
             {
                 "episode_rewards":   results["episode_rewards"],
                 "episode_lengths":   results["episode_lengths"],
+                "episode_agent_turns": results["episode_agent_turns"],
                 "order_completions": results["order_completions"],
                 "factory_name":      results["factory_name"],
             },
@@ -353,6 +416,10 @@ def main() -> None:
         )
     print(f"  Stats saved   → {json_path}")
     print()
+
+    if dashboard is not None:
+        dashboard.finish(wait=True)
+        dashboard.close()
 
 
 if __name__ == "__main__":

@@ -127,6 +127,11 @@ class ProductAgent(BaseAgent):
         # Initialise the MDP engine with the product type configuration
         self._init_mdp_engine(product_type)
 
+    def seed(self, seed: Optional[int] = None) -> None:
+        """Seeds stochastic MDP exploration without touching global NumPy state."""
+        if self._mdp_engine is not None:
+            self._mdp_engine.seed(seed)
+
     # -----------------------------------------------------------------------
     # MDP engine initialisation (Section 3.4.2)
     # -----------------------------------------------------------------------

@@ -259,20 +259,22 @@ def main() -> None:
     print_airport_state(env)
     print_is_platform_state(env)
 
-    # ── 10-step simulation ───────────────────────────────────────────────────
-    print_section("🔄  SIMULATION — 10 STEPS (random actions)")
+    # ── 10-cycle simulation ──────────────────────────────────────────────────
+    print_section("🔄  SIMULATION — 10 CYCLES (random actions)")
     print("  Simulates a 10-minute GH operations scenario.\n")
 
     rewards_acc: dict[str, float] = {}
-    for step_i in range(10):
+    turn_i = 0
+    while env.agents and env.simulation_step < 10:
         if not env.agents:
             print("  ⚠  All agents have finished.")
             break
 
         agent = env.agent_selection
         obs, rew, term, trunc, info = env.last()
-        action = env.action_space(agent).sample()
+        action = None if term or trunc else env.action_space(agent).sample()
         env.step(action)
+        turn_i += 1
 
         rewards_acc[agent] = rewards_acc.get(agent, 0.0) + rew
         atype = env._agent_type(agent)
@@ -282,9 +284,9 @@ def main() -> None:
         if is_neg:
             outcome = is_neg.get("outcome", "")
             icon = "✅" if outcome == "APPROVED" else "⚠"
-            print(f"  [{step_i+1:02d}] {icon} IS Negotiation — {agent[:35]}: {outcome}")
-        elif step_i < 5:
-            print(f"  [{step_i+1:02d}] {atype:10s} {agent[:35]:<35} "
+            print(f"  [{turn_i:03d}] {icon} IS Negotiation — {agent[:35]}: {outcome}")
+        elif turn_i <= 5:
+            print(f"  [{turn_i:03d}] {atype:10s} {agent[:35]:<35} "
                   f"rew={rew:+.2f}  act={action}")
 
     print(f"\n  Accumulated rewards (first {len(rewards_acc)} agents with action):")
