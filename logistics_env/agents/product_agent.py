@@ -26,6 +26,7 @@ The MDP state of the product follows Equation 4:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import IntEnum
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -105,6 +106,10 @@ class ProductAgent(BaseAgent):
 
         # Who is carrying the product now (agent_id or None)
         self.carried_by:    Optional[str]       = None
+
+        # Last route transition, pending confirmation by the IS Platform
+        # (point 3.c of the BDI algorithm)
+        self._pending_transition: Optional[dict] = None
 
         # Actualizar estado inicial con EPC payload
         self._state = self._state.__class__(
@@ -217,28 +222,87 @@ class ProductAgent(BaseAgent):
     def is_at_final_zone(self) -> bool:
         return self.route_index >= len(self.route) - 1
 
+    @property
+    def is_lost(self) -> bool:
+        return self._state.why == BusinessStep.LOST
+
+    @property
+    def is_processing(self) -> bool:
+        return (
+            self._state.why == BusinessStep.PROCESSING
+            and self.process_ticks_remaining > 0
+        )
+
+    @property
+    def is_available(self) -> bool:
+        """True if a worker or robot can pick the product up now."""
+        return (
+            self.carried_by is None
+            and not self.is_dispatched
+            and not self.is_lost
+            and not self.is_processing
+        )
+
+    def move_to(self, pos: Position) -> None:
+        """
+        Updates the physical position while the product is being carried.
+
+        No EPC event is generated: the read point (zone_id) only changes when
+        the product reaches a route zone (``arrive_at_zone``).
+        """
+        self._state = replace(self._state, where=pos)
+
     # -----------------------------------------------------------------------
     # Avance de ruta
     # -----------------------------------------------------------------------
 
-    def arrive_at_zone(self, zone_id: str, pos: Position, step: int) -> None:
-        """Marks that the product has arrived at a route zone."""
+    def arrive_at_zone(
+        self, zone_id: str, pos: Position, step: int, zone_type: Optional[str] = None,
+    ) -> float:
+        """
+        Marks that the product has arrived at a route zone.
+
+        Returns the transition reward R(s,s') weighted by the global policy
+        (Equations 6/8) and updates the MDP Q-table with it.
+        """
         if self.route_index < len(self.route) and self.route[self.route_index] == zone_id:
+            s_from = self._state.to_mdp_state()
             self.route_index += 1
             why = BusinessStep.IN_TRANSIT
 
             if zone_id == "DISPATCH" or self.route_index >= len(self.route):
                 why = BusinessStep.DISPATCHED
-            elif self.product_type.requires_processing and "PROCESSING" in zone_id:
+            elif self.product_type.requires_processing and (
+                zone_type == "process" or "PROCESSING" in zone_id
+            ):
                 why = BusinessStep.PROCESSING
                 self.process_ticks_remaining = self.product_type.process_time_steps
-            elif "PACKING" in zone_id:
+            elif zone_type == "packing" or "PACKING" in zone_id:
                 why = BusinessStep.PACKED
 
             self.update_state(
                 step=step, where=pos, why=why, zone_id=zone_id,
                 payload={**self.epc.to_dict(), "route_index": self.route_index},
             )
+            return self._record_transition(s_from, step)
+        return 0.0
+
+    def _record_transition(self, s_from: PhysicalBDIState, step: int) -> float:
+        """Evaluates and learns from the route transition just executed."""
+        s_to   = self._state.to_mdp_state()
+        belief = self.generate_beliefs({"step": step})
+        tr = TransitionReward(
+            delay=belief.delay, cost=belief.cost,
+            qos=belief.qos, energy=belief.energy,
+        )
+        r = tr.weighted_sum(self._policy_A, self._policy_B, self._policy_C, self._policy_D)
+        self.update_q_after_execution(s_from, s_to, belief, success=True)
+        self._pending_transition = {
+            "state_from": str(s_from),
+            "state_to":   str(s_to),
+            "reward":     r,
+        }
+        return r
 
     def tick_processing(self) -> bool:
         """
@@ -413,7 +477,7 @@ class ProductAgent(BaseAgent):
         e. Discards failed/impossible attitudes
         """
         reward   = 0.0
-        done     = self.is_dispatched
+        done     = self.is_dispatched or self.is_lost
         info: dict = {
             "epc":        self.epc.pure_identity_uri,
             "action":     action,
@@ -438,6 +502,14 @@ class ProductAgent(BaseAgent):
                 next_state=next_state,
             )
             info["next_mdp_state"] = str(next_state)
+
+        # Point 3.c: Confirmation — send the last executed transition to the IS Platform
+        if self._pending_transition is not None:
+            info["pending_is_proposal"] = True
+            info["mdp_state"]      = self._pending_transition["state_from"]
+            info["next_mdp_state"] = self._pending_transition["state_to"]
+            info["reward"]         = self._pending_transition["reward"]
+            self._pending_transition = None
 
         # Point 3.d: Execute action and compute reward
         if pa == ProductAction.WAIT:

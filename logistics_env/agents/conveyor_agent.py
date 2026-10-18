@@ -191,12 +191,8 @@ class ConveyorAgent(BaseAgent):
             self.speed       = self.cfg.speed_cells_per_step
             reward -= 0.5   # reversing is always costly
 
-        # Advance products on the belt
-        discharged = self.advance(sim_step)
-        if discharged:
-            reward += len(discharged) * 1.0   # each product that exits is positive
-            info["discharged"] = discharged
-
+        # Products advance once per round in the environment (_end_of_round),
+        # which also hands discharged products over to their next zone.
         if self.is_jammed:
             reward -= 2.0
             info["jammed"] = True

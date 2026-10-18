@@ -58,7 +58,11 @@ class Order:
         return len(self.dispatched_epcs)
 
     def register_dispatch(self, epc_uri: str, step: int) -> None:
+        # COMPLETE and FAILED are final states
+        if self.status in (OrderStatus.COMPLETE, OrderStatus.FAILED):
+            return
         self.dispatched_epcs.add(epc_uri)
+        self.status = OrderStatus.IN_PROGRESS
         if self.products_dispatched >= self.total_products_needed:
             self.status      = OrderStatus.COMPLETE
             self.finish_step = step
@@ -129,8 +133,9 @@ class OrderManager:
         if not order_id:
             return None
         order = self.orders[order_id]
+        was_complete = order.is_complete
         order.register_dispatch(epc_uri, step)
-        if order.is_complete:
+        if order.is_complete and not was_complete:
             return order.compute_reward(self.factory_cfg.reward_weights, step)
         return None
 
