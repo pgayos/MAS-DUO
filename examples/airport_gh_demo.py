@@ -220,7 +220,7 @@ class GreedyGHPolicy:
 
         return best
 
-    def score_snapshot(self, env: "LogisticsMaEnv") -> dict:
+    def score_snapshot(self, env: "LogisticsMaEnv", cum_reward: float = 0.0) -> dict:
         """Computes performance metrics for the solver at the current step."""
         summary = env._order_mgr.get_summary() if env._order_mgr else {}
         total   = len(summary)
@@ -229,11 +229,11 @@ class GreedyGHPolicy:
         ontime  = sum(
             1 for oid, i in summary.items()
             if i.get("status") == "complete"
-            and i.get("dispatched", 0) >= i.get("needed", 1)
-            and (i.get("deadline", 999) or 999) >= env._step_count
+            and i.get("finish_step") is not None
+            and i["finish_step"] <= i.get("deadline", 0)
         )
         energy  = env._total_energy
-        cumr    = sum(env._cumulative_rewards.values())
+        cumr    = cum_reward
         return {
             "total": total,
             "done":  done,
@@ -307,14 +307,15 @@ def print_step_summary(step: int, env: "LogisticsMaEnv", solver: "GreedyGHPolicy
             "complete": "✓ OK",
             "failed":   "✗ DELAY",
             "pending":  f"T-{max(0, remaining):02d}",
+            "in_progress": f"T-{max(0, remaining):02d}",
         }.get(status, "?")
         bar = "█" * min(10, disp * 10 // max(needed, 1))
         print(f"    {oid:<12s} [{prio[0].upper()}] {disp}/{needed} {bar:<10s} {tag}")
 
 
 def print_final_report(env: "LogisticsMaEnv", solver: "GreedyGHPolicy",
-                        elapsed_wall: float, steps_run: int):
-    s = solver.score_snapshot(env)
+                        elapsed_wall: float, steps_run: int, cum_reward: float = 0.0):
+    s = solver.score_snapshot(env, cum_reward)
     summary = env._order_mgr.get_summary() if env._order_mgr else {}
 
     print("\n" + "═" * 68)
@@ -439,6 +440,7 @@ def run_demo(
 
             # Verificar si el entorno ha terminado
             obs, reward, term, trunc, info = raw_env.last()
+            cum_reward += reward
 
             if term or trunc:
                 # Terminated/truncated agent: pass None as action
@@ -464,7 +466,6 @@ def run_demo(
             except (KeyError, ValueError):
                 action_name = str(action)
             raw_env.step(action)
-            cum_reward += reward
 
             # Update renderer info
             extra_info["reward"] = cum_reward
@@ -499,7 +500,7 @@ def run_demo(
 
     finally:
         elapsed = time.time() - t_start
-        print_final_report(raw_env, policy, elapsed, steps_run)
+        print_final_report(raw_env, policy, elapsed, steps_run, cum_reward)
         if not headless:
             raw_env.close()
 
@@ -507,7 +508,7 @@ def run_demo(
         "steps":      steps_run,
         "cum_reward": cum_reward,
         "elapsed":    elapsed,
-        "score":      policy.score_snapshot(raw_env),
+        "score":      policy.score_snapshot(raw_env, cum_reward),
     }
 
 

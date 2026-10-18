@@ -24,7 +24,6 @@ Global reward scheme
 
 from __future__ import annotations
 
-import functools
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -111,6 +110,7 @@ class LogisticsMaEnv(AECEnv):
         self._step_count: int = 0
         self._agent_turn_count: int = 0
         self._total_energy: float = 0.0
+        self._energy_seen: Dict[str, float] = {}
         self._rng: np.random.Generator = np.random.default_rng()
         # IS Platform and global policy (MAS-DUO Section 3.3)
         self._is_platform: Optional[ISPlatform] = None
@@ -142,8 +142,8 @@ class LogisticsMaEnv(AECEnv):
     def action_space(self, agent: str) -> spaces.Space:
         return self.action_spaces[agent]
 
-    @functools.lru_cache(maxsize=None)
     def _cached_obs_space(self, agent_type: str) -> spaces.Space:
+        # A new Space per call: agents must not share (and re-seed) one instance
         if agent_type == "product":
             return spaces.Box(low=0.0, high=1.0, shape=(_PRODUCT_OBS,), dtype=np.float32)
         if agent_type == "worker":
@@ -154,7 +154,6 @@ class LogisticsMaEnv(AECEnv):
             return spaces.Box(low=0.0, high=1.0, shape=(_CONVEYOR_OBS,), dtype=np.float32)
         raise ValueError(f"Tipo de agente desconocido: {agent_type!r}")
 
-    @functools.lru_cache(maxsize=None)
     def _cached_act_space(self, agent_type: str) -> spaces.Space:
         sizes = {
             "product":  len(ProductAction),
@@ -182,22 +181,29 @@ class LogisticsMaEnv(AECEnv):
         self._step_count  = 0
         self._agent_turn_count = 0
         self._total_energy = 0.0
+        self._energy_seen = {}
 
         # ── Order manager + EPCs ────────────────────────────────────────────
         self._order_mgr = OrderManager(cfg)
         epcs = self._order_mgr.initialize_orders()
 
         # ── Productos ───────────────────────────────────────────────────────
+        # Products are objects on the floor, not obstacles: they do not occupy
+        # grid cells, so workers and robots can reach them to pick them up.
+        # Each product starts inside the first zone of its route.
         self._products = {}
-        receiving_zone = cfg.zone_by_id("RECEIVING")
-        rx, ry = (receiving_zone.x + 1, receiving_zone.y + 1) if receiving_zone else (1, 1)
+        placed_in_zone: Dict[str, int] = {}
 
-        for i, epc in enumerate(epcs):
+        for epc in epcs:
             item_ref   = self._order_mgr.epc_to_item[epc.pure_identity_uri]
             pt_cfg     = cfg.product_type_by_ref(item_ref)
             order_id   = self._order_mgr.epc_to_order[epc.pure_identity_uri]
             order_cfg  = next(o for o in cfg.orders if o.order_id == order_id)
-            start_pos  = Position(rx + (i % 2), ry + i // 2)
+            start_zone = pt_cfg.processing_steps[0] if pt_cfg.processing_steps else "RECEIVING"
+            cells      = self._grid.zone_cells.get(start_zone) or [(1, 1)]
+            k          = placed_in_zone.get(start_zone, 0)
+            placed_in_zone[start_zone] = k + 1
+            start_pos  = Position(*cells[k % len(cells)])
             agent = ProductAgent(
                 epc=epc, product_type=pt_cfg,
                 start_pos=start_pos,
@@ -206,21 +212,24 @@ class LogisticsMaEnv(AECEnv):
             )
             self._products[epc.pure_identity_uri] = agent
             agent.seed(int(self._rng.integers(0, np.iinfo(np.uint32).max)))
-            self._grid.place_agent(epc.pure_identity_uri, start_pos)
+            if pt_cfg.processing_steps and self._grid.zone_cells.get(start_zone):
+                # Initial EPC read at the first read point of the route
+                zone = cfg.zone_by_id(start_zone)
+                agent.arrive_at_zone(start_zone, start_pos, 0, zone.type if zone else None)
 
         # ── Workers ─────────────────────────────────────────────────────────
         self._workers = {}
         for wcfg in cfg.workers:
             w = WorkerAgent(wcfg)
             self._workers[wcfg.id] = w
-            self._grid.place_agent(wcfg.id, w.position)
+            self._place_mobile_agent(wcfg.id, w.position)
 
         # ── Robots ──────────────────────────────────────────────────────────
         self._robots = {}
         for rcfg in cfg.robots:
             r = RobotAgent(rcfg)
             self._robots[rcfg.id] = r
-            self._grid.place_agent(rcfg.id, r.position)
+            self._place_mobile_agent(rcfg.id, r.position)
 
         # ── Conveyors ───────────────────────────────────────────────────────
         self._conveyors = {}
@@ -328,6 +337,10 @@ class LogisticsMaEnv(AECEnv):
         # ── Agent interaction logic ──────────────────────────────────────────
         step_reward += self._process_interactions(agent_id, atype, result, grid_state)
 
+        # A carried product moves with its carrier
+        if atype in ("worker", "robot") and agent_obj.carrying in self._products:
+            self._products[agent_obj.carrying].move_to(agent_obj.position)
+
         # ── Energy tracking ──────────────────────────────────────────────────
         energy_delta = self._extract_energy(agent_id, atype, agent_obj)
         self._total_energy += energy_delta
@@ -335,8 +348,8 @@ class LogisticsMaEnv(AECEnv):
 
         self.rewards[agent_id] = step_reward
 
-        # Terminate agent if dispatched (product)
-        if atype == "product" and agent_obj.is_dispatched:
+        # Terminate product agents once dispatched or lost (deadline missed)
+        if atype == "product" and (agent_obj.is_dispatched or agent_obj.is_lost):
             self.terminations[agent_id] = True
 
         # ── Fin de ronda de agentes ──────────────────────────────────────────
@@ -425,11 +438,21 @@ class LogisticsMaEnv(AECEnv):
                 for prod in self._products.values():
                     prod.set_policy_params(A, B, C, D)
 
+        # ── Processing in process zones ─────────────────────────────────────
+        # (a product arriving during this round starts processing next round)
+        for prod in self._products.values():
+            arrived_this_round = prod.state.when >= self._step_count - 1
+            if prod.is_processing and prod.carried_by is None and not arrived_this_round:
+                prod.tick_processing()
+
         # ── Avanzar cintas ───────────────────────────────────────────────────
         for cb in self._conveyors.values():
             discharged = cb.advance(self._step_count)
             for epc_uri in discharged:
                 self._handle_product_reach_end_conveyor(cb, epc_uri)
+            for epc_uri, pos in cb.product_positions().items():
+                if epc_uri in self._products:
+                    self._products[epc_uri].move_to(pos)
 
         # ── Comprobar deadlines ──────────────────────────────────────────────
         penalty = self._order_mgr.check_deadlines(self._step_count)
@@ -458,25 +481,44 @@ class LogisticsMaEnv(AECEnv):
 
     def _handle_product_reach_end_conveyor(self, cb: ConveyorAgent, epc_uri: str) -> None:
         """When a product exits a conveyor, advances its state along the route."""
+        order_reward = self._deliver_product(epc_uri, cb.end_pos)
+        if order_reward:
+            # Distribuir la recompensa del pedido completado entre workers y robots
+            for aid in list(self._workers.keys()) + list(self._robots.keys()):
+                self.rewards[aid] = self.rewards.get(aid, 0.0) + order_reward * 0.5
+
+    def _deliver_product(self, epc_uri: str, pos: Position) -> float:
+        """
+        Leaves a product at ``pos``. If ``pos`` is inside the next zone of its
+        route, the product advances (EPC read event) and receives the
+        policy-weighted transition reward R(s,s'). When it reaches the end of
+        its route, the dispatch is registered with its order.
+
+        Returns the order reward if this delivery completes the order.
+        """
         product = self._products.get(epc_uri)
         if product is None:
-            return
+            return 0.0
+        product.carried_by = None
+        product.move_to(pos)
 
-        end_pos  = cb.end_pos
-        zone     = self._grid.zone_of(end_pos)
-        zone_id  = zone.id if zone else None
+        # A lost product (deadline missed) is just put down
+        if product.is_lost or epc_uri not in self.agents:
+            return 0.0
 
-        if zone_id and product.current_zone_target == zone_id:
-            product.arrive_at_zone(zone_id, end_pos, self._step_count)
+        zone = self._grid.zone_of(pos)
+        if zone is None or zone.id != product.current_zone_target:
+            return 0.0
 
-            # Recompensa por avanzar en ruta
-            order_id = product.order_id
-            reward   = self._order_mgr.register_product_dispatched(epc_uri, self._step_count) or 0.0
-            if reward:
-                # Distribuir la recompensa del pedido completado entre workers y robots
-                for aid in list(self._workers.keys()) + list(self._robots.keys()):
-                    self.rewards[aid] = self.rewards.get(aid, 0.0) + reward * 0.5
-                self.rewards[epc_uri] = self.rewards.get(epc_uri, 0.0) + reward
+        transition_reward = product.arrive_at_zone(zone.id, pos, self._step_count, zone.type)
+        self.rewards[epc_uri] = self.rewards.get(epc_uri, 0.0) + transition_reward
+
+        if not product.is_dispatched:
+            return 0.0
+        order_reward = self._order_mgr.register_product_dispatched(epc_uri, self._step_count) or 0.0
+        if order_reward:
+            self.rewards[epc_uri] = self.rewards.get(epc_uri, 0.0) + order_reward
+        return order_reward
 
     # -----------------------------------------------------------------------
     # Observaciones
@@ -507,10 +549,12 @@ class LogisticsMaEnv(AECEnv):
 
     def _build_grid_state(self) -> dict:
         """Builds the grid state dictionary to pass to agents."""
+        # Only products that can be picked up right now
         products_at: Dict[Tuple[int, int], List[str]] = {}
         for epc_uri, pa in self._products.items():
-            key = (pa.position.x, pa.position.y)
-            products_at.setdefault(key, []).append(epc_uri)
+            if pa.is_available:
+                key = (pa.position.x, pa.position.y)
+                products_at.setdefault(key, []).append(epc_uri)
 
         # Robot navigation targets (destination of next most urgent product)
         robot_targets: Dict[str, Tuple[int, int]] = {}
@@ -520,7 +564,7 @@ class LogisticsMaEnv(AECEnv):
                 best_dist = float("inf")
                 best_pos  = None
                 for epc_uri, prod in self._products.items():
-                    if prod.carried_by is None and not prod.is_dispatched:
+                    if prod.is_available:
                         d = robot.position.distance_to(prod.position)
                         if d < best_dist:
                             best_dist = d
@@ -583,12 +627,9 @@ class LogisticsMaEnv(AECEnv):
                 self._products[epc_uri].carried_by = agent_id
                 extra_reward += 0.5
 
-        # Worker deja un producto → intentar cargar en cinta
+        # Worker deja un producto → avanza en ruta o se carga en cinta
         if atype == "worker" and "placed" in info:
-            epc_uri = info["placed"]
-            if epc_uri in self._products:
-                self._products[epc_uri].carried_by = None
-                extra_reward += self._try_load_conveyor(epc_uri, agent_id, grid_state)
+            extra_reward += self._release_product(info["placed"], agent_id, grid_state)
 
         # Robot levanta un producto
         if atype == "robot" and "lifted" in info:
@@ -596,21 +637,31 @@ class LogisticsMaEnv(AECEnv):
             if epc_uri in self._products:
                 self._products[epc_uri].carried_by = agent_id
 
-        # Robot deposita un producto
+        # Robot deposita un producto → avanza en ruta o se carga en cinta
         if atype == "robot" and "dropped" in info:
-            epc_uri = info["dropped"]
-            if epc_uri in self._products:
-                prod = self._products[epc_uri]
-                prod.carried_by = None
-                robot_pos = self._robots[agent_id].position
-                zone = self._grid.zone_of(robot_pos)
-                if zone and zone.id == prod.current_zone_target:
-                    prod.arrive_at_zone(zone.id, robot_pos, self._step_count)
-                    reward = self._order_mgr.register_product_dispatched(epc_uri, self._step_count)
-                    extra_reward += (reward or 0.0)
-                extra_reward += self._try_load_conveyor(epc_uri, agent_id, grid_state)
+            extra_reward += self._release_product(info["dropped"], agent_id, grid_state)
 
         return extra_reward
+
+    def _release_product(self, epc_uri: str, carrier_id: str, grid_state: dict) -> float:
+        """A worker or robot puts a product down at its current position."""
+        if epc_uri not in self._products:
+            return 0.0
+        carrier = self._get_agent_obj(carrier_id)
+        reward  = self._deliver_product(epc_uri, carrier.position)
+        prod    = self._products[epc_uri]
+        if prod.is_available:
+            reward += self._try_load_conveyor(epc_uri, carrier_id, grid_state)
+        return reward
+
+    def _place_mobile_agent(self, agent_id: str, pos: Position) -> None:
+        """Places a worker/robot at its start cell; start cells must be distinct."""
+        other = self._grid.occupancy.get((pos.x, pos.y))
+        if other is not None:
+            raise ValueError(
+                f"{agent_id} and {other} share the start position ({pos.x}, {pos.y})"
+            )
+        self._grid.place_agent(agent_id, pos)
 
     def _try_load_conveyor(self, epc_uri: str, depositor_id: str, grid_state: dict) -> float:
         """
@@ -626,18 +677,24 @@ class LogisticsMaEnv(AECEnv):
         if cb_id and cb_id in self._conveyors:
             cb = self._conveyors[cb_id]
             if cb.load_product(epc_uri):
+                self._products[epc_uri].carried_by = cb_id
                 return 1.0   # reward for correctly loading onto the belt
         return 0.0
 
     def _extract_energy(self, agent_id: str, atype: str, agent_obj) -> float:
-        """Extracts the energy delta consumed in this step for penalisation."""
-        if atype == "worker":
-            return agent_obj.cfg.energy_per_action
-        if atype == "robot":
-            return agent_obj.cfg.energy_per_move
-        if atype == "conveyor":
-            return agent_obj.cfg.energy_per_step if agent_obj.is_running else 0.0
-        return 0.0
+        """
+        Energy actually consumed by the agent since its previous turn
+        (conveyors consume when they advance at the end of each round).
+        """
+        if atype in ("worker", "robot"):
+            total = agent_obj.total_energy_used
+        elif atype == "conveyor":
+            total = agent_obj.energy_consumed
+        else:
+            return 0.0
+        delta = total - self._energy_seen.get(agent_id, 0.0)
+        self._energy_seen[agent_id] = total
+        return delta
 
     # -----------------------------------------------------------------------
     # Render

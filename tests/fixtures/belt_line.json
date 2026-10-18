@@ -1,0 +1,172 @@
+{
+  "factory": {
+    "id": "BELT-LINE",
+    "name": "BELT-LINE",
+    "company_prefix": "0614141",
+    "grid": {
+      "width": 10,
+      "height": 5,
+      "cell_size_meters": 1.0
+    },
+    "zones": [
+      {
+        "id": "IN",
+        "name": "IN",
+        "x": 0,
+        "y": 0,
+        "width": 2,
+        "height": 5,
+        "type": "input"
+      },
+      {
+        "id": "OUT",
+        "name": "OUT",
+        "x": 8,
+        "y": 0,
+        "width": 2,
+        "height": 5,
+        "type": "output"
+      }
+    ],
+    "conveyor_belts": [
+      {
+        "id": "CB-001",
+        "name": "Belt IN-OUT",
+        "energy_per_step": 0.5,
+        "speed_cells_per_step": 1,
+        "path": [
+          {
+            "x": 1,
+            "y": 2
+          },
+          {
+            "x": 2,
+            "y": 2
+          },
+          {
+            "x": 3,
+            "y": 2
+          },
+          {
+            "x": 4,
+            "y": 2
+          },
+          {
+            "x": 5,
+            "y": 2
+          },
+          {
+            "x": 6,
+            "y": 2
+          },
+          {
+            "x": 7,
+            "y": 2
+          },
+          {
+            "x": 8,
+            "y": 2
+          }
+        ],
+        "direction": "east",
+        "capacity": 8
+      }
+    ],
+    "robots": [
+      {
+        "id": "ROB-001",
+        "name": "ROB-001",
+        "start_position": {
+          "x": 3,
+          "y": 0
+        },
+        "energy_capacity": 500.0,
+        "energy_per_move": 1.0,
+        "energy_per_lift": 1.0,
+        "speed_cells_per_step": 1,
+        "carrying_capacity": 1,
+        "recharge_rate": 10.0,
+        "recharge_threshold": 5.0
+      }
+    ],
+    "workers": [
+      {
+        "id": "WRK-001",
+        "name": "Operator",
+        "start_position": {
+          "x": 9,
+          "y": 4
+        },
+        "role": "packer",
+        "energy_per_action": 0.1,
+        "fatigue_rate": 0.01,
+        "rest_threshold": 0.9,
+        "speed_cells_per_step": 1,
+        "allowed_zones": [
+          "OUT"
+        ]
+      }
+    ],
+    "product_types": [
+      {
+        "item_reference": "0000002",
+        "name": "Box",
+        "size": 1,
+        "weight_kg": 1.0,
+        "requires_processing": false,
+        "processing_steps": [
+          "IN",
+          "OUT"
+        ],
+        "process_time_steps": 0
+      }
+    ],
+    "orders": [
+      {
+        "order_id": "ORD-1",
+        "products": [
+          {
+            "item_reference": "0000002",
+            "quantity": 1
+          }
+        ],
+        "deadline_steps": 60,
+        "priority": "high",
+        "destination": "C"
+      }
+    ],
+    "reward_weights": {
+      "on_time_delivery": 100.0,
+      "late_penalty_per_step": -5.0,
+      "energy_penalty": -0.1,
+      "wrong_route_penalty": -10.0,
+      "idle_penalty": -0.5,
+      "partial_order_bonus": 20.0,
+      "full_order_bonus": 50.0
+    },
+    "sim_params": {
+      "max_steps": 200,
+      "step_duration_seconds": 5,
+      "random_order_arrival": false,
+      "order_arrival_rate": 0.0
+    },
+    "global_policy": {
+      "mode": "static",
+      "initial": {
+        "A": 0.5,
+        "B": 0.4,
+        "C": 0.0,
+        "D": 0.1
+      },
+      "scheduled_changes": []
+    },
+    "is_platform": {
+      "max_allowed_cost": 999.0,
+      "max_allowed_delay": 50.0,
+      "production_capacity": 1.0,
+      "min_qos_threshold": 0.0,
+      "client_priority": 0.5,
+      "min_reward_threshold": -15.0
+    }
+  }
+}
